@@ -1,9 +1,13 @@
+"""
+read_modbus_serial.py
+Rice Eclipse
+Andrew Bare
+"""
 import sys
 import os
 from labjack import ljm
 
 def main(handle):
-      # T7, any connection, any identifier
 
 
     info = ljm.getHandleInfo(handle)
@@ -14,7 +18,7 @@ def main(handle):
     # Setup and call eReadAddress to read a value from the LabJack.
 
     try:
-        address = sys.argv[1]  # Set serial number from terminal args
+        address = int(sys.argv[1])  # Set serial number from terminal args
     except IndexError:
         address = 0 # Set default serial number 0
     dataType = ljm.constants.UINT32
