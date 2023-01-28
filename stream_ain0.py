@@ -96,18 +96,17 @@ if __name__ == '__main__':
     handle = ljm.openS("T7", "ANY", "ANY")
     try:
         main(handle)
+        print("\nStop Stream")
+        ljm.eStreamStop(handle)
+    except ljm.LJMError:
+        ljme = sys.exc_info()[1]
+        print(ljme)
+    except KeyboardInterrupt:
+        ljm.close(handle)
         try:
-            print("\nStop Stream")
-            ljm.eStreamStop(handle)
-        except ljm.LJMError:
-            ljme = sys.exc_info()[1]
-            print(ljme)
-        except KeyboardInterrupt:
-            ljm.close(handle)
-            try:
-                sys.exit(130)
-            except:
-                os._exit(130)
-        except Exception:
-            e = sys.exc_info()[1]
-            print(e)
+            sys.exit(130)
+        except:
+            os._exit(130)
+    except Exception:
+        e = sys.exc_info()[1]
+        print(e)
