@@ -18,9 +18,17 @@ def main(handle):
         "Serial number: %i, IP address: %s, Port: %i,\nMax bytes per MB: %i" %
         (info[0], info[1], info[2], ljm.numberToIP(info[3]), info[4], info[5]))
 
+    aScanListNames = []
+    try:
+        for address in sys.argv[1:]:
+            aScanListNames.append("AIN" + str(address))
+    except IndexError:
+        # Default to only scanning AIN0
+        aScanListNames = ["AIN0"]
+
 
     deviceType = info[0]
-    aScanListNames = ["AIN0", "AIN1"]  # Scan list names to stream
+    aScanListNames = ["AIN0"]  # Scan list names to stream
     numAddresses = len(aScanListNames)
     aScanList = ljm.namesToAddresses(numAddresses, aScanListNames)[0]
     scanRate = 1000
@@ -78,13 +86,13 @@ def main(handle):
 
         end = datetime.now()
 
-        print("\nTotal scans = %i" % (totScans))
+        print("\nTotal scans: %i" % (totScans))
         tt = (end - start).seconds + float((end - start).microseconds) / 1000000
-        print("Time taken = %f seconds" % (tt))
-        print("LJM Scan Rate = %f scans/second" % (scanRate))
-        print("Timed Scan Rate = %f scans/second" % (totScans / tt))
-        print("Timed Sample Rate = %f samples/second" % (totScans * numAddresses / tt))
-        print("Skipped scans = %0.0f" % (totSkip / numAddresses))
+        print("Time taken: %f seconds" % (tt))
+        print("LJM Scan Rate: %f scans/second" % (scanRate))
+        print("Timed Scan Rate: %f scans/second" % (totScans / tt))
+        print("Timed Sample Rate: %f samples/second" % (totScans * numAddresses / tt))
+        print("Skipped scans: %0.0f" % (totSkip / numAddresses))
     except ljm.LJMError:
         ljme = sys.exc_info()[1]
         print(ljme)
@@ -96,8 +104,9 @@ if __name__ == '__main__':
     handle = ljm.openS("T7", "ANY", "ANY")
     try:
         main(handle)
-        print("\nStop Stream")
+        
         ljm.eStreamStop(handle)
+        print("\nStream ended.")
     except ljm.LJMError:
         ljme = sys.exc_info()[1]
         print(ljme)

@@ -15,7 +15,6 @@ def main(handle):
         "Serial number: %i, IP address: %s, Port: %i,\nMax bytes per MB: %i" %
         (info[0], info[1], info[2], ljm.numberToIP(info[3]), info[4], info[5]))
 
-    # Setup and call eReadAddress to read a value from the LabJack.
 
     try:
         address = int(sys.argv[1])  # Set serial number from terminal args
