@@ -21,7 +21,8 @@ def main(handle):
     aScanListNames = ["AIN0"]
     addresses = sys.argv[1:]
     if addresses != []:
-        for address in addresses :
+        for address in addresses:
+            aScanListNames = []
             aScanListNames.append("AIN" + str(address))
         
     print(aScanListNames)
