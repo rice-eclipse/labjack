@@ -18,17 +18,12 @@ def main(handle):
         "Serial number: %i, IP address: %s, Port: %i,\nMax bytes per MB: %i" %
         (info[0], info[1], info[2], ljm.numberToIP(info[3]), info[4], info[5]))
 
-    aScanListNames = []
-    print(sys.argv)
-    try:
-        addresses = sys.argv[1:]
-        for address in addresses and if addresses != []:
+    aScanListNames = ["AIN0"]
+    addresses = sys.argv[1:]
+    if addresses != []:
+        for address in addresses :
             aScanListNames.append("AIN" + str(address))
-        else:
-            aScanListNames = ["AIN0"]
-    except IndexError:
-        # Default to only scanning AIN0
-        aScanListNames = ["AIN0"]
+        
     print(aScanListNames)
 
     deviceType = info[0]
