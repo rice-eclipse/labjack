@@ -22,8 +22,10 @@ def main(handle):
     print(sys.argv)
     try:
         addresses = sys.argv[1:]
-        for address in addresses:
+        for address in addresses and if addresses != []:
             aScanListNames.append("AIN" + str(address))
+        else:
+            aScanListNames = ["AIN0"]
     except IndexError:
         # Default to only scanning AIN0
         aScanListNames = ["AIN0"]
