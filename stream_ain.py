@@ -19,16 +19,17 @@ def main(handle):
         (info[0], info[1], info[2], ljm.numberToIP(info[3]), info[4], info[5]))
 
     aScanListNames = []
+    print(sys.argv)
     try:
-        for address in sys.argv[1:]:
+        addresses = sys.argv[1:]
+        for address in addresses:
             aScanListNames.append("AIN" + str(address))
     except IndexError:
         # Default to only scanning AIN0
         aScanListNames = ["AIN0"]
-
+    print(aScanListNames)
 
     deviceType = info[0]
-    aScanListNames = ["AIN0"]  # Scan list names to stream
     numAddresses = len(aScanListNames)
     aScanList = ljm.namesToAddresses(numAddresses, aScanListNames)[0]
     scanRate = 1000
