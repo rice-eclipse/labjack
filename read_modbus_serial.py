@@ -5,10 +5,10 @@ Andrew Bare
 """
 import sys
 import os
+
 from labjack import ljm
 
 def main(handle):
-
 
     info = ljm.getHandleInfo(handle)
     print("Opened a LabJack with Device type: %i, Connection type: %i,\n"
