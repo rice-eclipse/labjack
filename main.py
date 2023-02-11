@@ -16,6 +16,7 @@ import select
 import numpy as np
 import configparser
 import json
+from threading import Thread
 
 # Method to read config file settings
 def read_config():
@@ -25,31 +26,34 @@ def read_config():
 
 # Open socket connection    
 def setup_socket():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        print("\nBinding socket to: " + str(HOST) + ":" + str(PORT))
-        s.bind((HOST,PORT))
-        print("\nWaiting for incoming connection...")
-        s.listen()
-        conn, addr = s.accept()
-        print("\nFound incoming connection")
-        return conn, addr
+    print("\nWaiting for incoming connection...")
+    s.listen()
+    conn, addr = s.accept()
+    print("\nFound incoming connection")
+    return conn, addr
 
 # Send data points to dashboard
 def command_from_dash(conn):
-    with conn:
+    while True:
         print("\nChecking for command from dashboard")
-        print(conn)
         ready = select.select([conn], [], [], 1)
-        print("CHECKPOINT")
         if ready[0]:
             cmd = conn.recv(1024).decode('utf-8')
             print("\nReceived command: " + str(cmd))
             if not cmd:
-                return "close" 
-            return cmd 
+                return "00" 
+            print(cmd) 
+            if cmd[0] in config["driver_mapping"].keys() and cmd[0] != "6":
+                ljm.eWriteName(handle,config["driver_mapping"][cmd[0]],cmd[1])
+            elif cmd[0] == "6":
+                #TODO ignition sequence helper call
+                pass
+            elif cmd[0] == "close":
+                print("Closing connection")
+                break
         else:
             print("\nNone found")
-            return "nothing" 
+        time.sleep(.01)
 
 # Receive commands from dashboard
 def data_to_dash(conn,console,sensors = "",states = "",timestamp = ""):
@@ -66,15 +70,16 @@ def data_to_dash(conn,console,sensors = "",states = "",timestamp = ""):
     JSONData['states'] = states
     JSONData['console'] = console
     JSONObj = json.dumps(JSONData)
-    with conn:  
-        print("\nAttempting to send data to dashboard")
-        try: 
-            conn.sendall(JSONObj.encode('UTF-8'))
-            print("\ndata successfully sent")
-            return 0
-        except:
-            print("\nexception raised in data sent")
-            return -1
+    # with conn:  
+    print("\nAttempting to send ",console,"to dashboard")
+    try: 
+        conn.sendall(JSONObj.encode('UTF-8'))
+        print("\nSuccessfully sent: ",JSONObj.encode('UTF-8'))          
+    except Exception as e:
+        print("\nexception raised in data sent")
+        print(e)
+        print("Connection lost! Waiting for reconnect before resend")
+        conn, addr = setup_socket()
 
 # Log data to Raspberry Pi
 def local_log(writer,sensors,sweepnum):
@@ -82,7 +87,7 @@ def local_log(writer,sensors,sweepnum):
     sensorsR = np.asarray(sensors).reshape(SAMPLE_RATE,NUM_SENSORS)
     write_data = np.column_stack((np.transpose(timestamps),sensorsR))
     writer.writerows(write_data)
-    print("Batch logged to Pi")
+    print("\nBatch " + str(sweepnum) + " logged to Pi")
 
 def main(handle):
     info = ljm.getHandleInfo(handle)
@@ -105,7 +110,9 @@ def main(handle):
     scanRate = SAMPLE_RATE
     scansPerRead = scanRate#check
     conn,addr = setup_socket()
-    data_to_dash(conn,"1")
+    # data_to_dash(conn,"1")
+    dashlistener = Thread(target = command_from_dash, args = (conn, ))
+    dashlistener.start()
     try:
         # Ensure triggered stream is disabled.
         ljm.eWriteName(handle, "STREAM_TRIGGER_INDEX", 0)
@@ -119,7 +126,6 @@ def main(handle):
         aNames = ["AIN_ALL_NEGATIVE_CH", "AIN0_RANGE",
             "STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
         aValues = [ljm.constants.GND, 10.0, 0, 0]
-
         # Write the analog inputs' negative channels (when applicable), ranges,
         # stream settling time and stream resolution configuration.
         numFrames = len(aNames)
@@ -152,24 +158,14 @@ def main(handle):
                 "%i" % (curSkip/NUM_SENSORS, ret[1], ret[2]))
             i += 1
             #writing pin values corresponding to command received
-            """
-            cmd = command_from_dash(conn) #"1-6,(0 -> close, 1 -> open)"
-            if cmd[0] in config["driver_mapping"].keys() and cmd[0] != "6":
-                ljm.eWriteName(handle,config["driver_mapping"][cmd[0]],cmd[1])
-            elif cmd[0] == "6":
-                #TODO ignition sequence helper call
-                pass
-            elif cmd[0] == "close":
-                print("Closing connection")
-                break
-            """
+            # data_to_dash(conn,"test")
             states = []
             #reading current valve pin states
             for driver in config["driver_mapping"].keys():
                 states.append(ljm.eReadName(handle,config["driver_mapping"][driver]))
-            data_to_dash(conn,sendData,states)
             #write values from this sweep to SD card
             local_log(writer,aData,i)
+            data_to_dash(conn,"data",sendData,states)
         end = datetime.now()
         print("\nTotal scans: %i" % (totScans))
         tt = (end - start).seconds + float((end - start).microseconds) / 1000000
@@ -192,6 +188,9 @@ if __name__ == '__main__':
     SAMPLE_RATE = int(config["general"]["SAMPLE_RATE"])
     NUM_SENSORS = int(config["general"]["NUM_SENSORS"])
     NUM_DRIVERS = int(config["general"]["NUM_DRIVERS"])
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    print("\nBinding socket to: " + str(HOST) + ":" + str(PORT))
+    s.bind((HOST,PORT))
     handle = ljm.openS("T7", "USB", "ANY")
     try:
         main(handle)
