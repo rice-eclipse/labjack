@@ -1,9 +1,10 @@
-#Concept testing for interleaved logging, command handling, and dashboard
-#data relay
+#Main driver code for Raspberry Pi3
 #
-#Spencer Darwall, ChatGPT,
+#Multithreaded logging, command listening/handling, and dashbaord uploading
+#Configured by configurations.ini
+#
+#Spencer Darwall
 #2/7/23
-#
 
 from datetime import datetime
 from labjack import ljm
@@ -30,14 +31,12 @@ def setup_socket():
     print("\nWaiting for connection request...")
     s.listen()
     global conn
-    conn, addr = s.accept()
-    print("\nFound incoming connection")
-    return conn, addr
+    conn, _ = s.accept()
 
 # Create file writer
 def open_file():
     filename = config["general"]["filename"]
-    os.remove(filename + ".csv") #TODO delete and ensure new filename each run (get timestamp from dash?)
+    os.remove(filename + ".csv") #TODO ensure new filename each run (get timestamp from dash?)
     file = open(filename + ".csv", "x")
     writer = csv.writer(file)
     # print(json.loads(config.get("general","col_format")))
@@ -46,74 +45,72 @@ def open_file():
     return writer
 
 # Dashboard listener 
-def command_from_dash(conn):
+def command_from_dash(closeLock):
     # Loop indefinitely, until universal "STOP" received
     #TODO proper error handling
     while True:
-        # print("\nChecking for command from dashboard")
-        ready = select.select([conn], [], [], .1)
-        if ready[0]:
-            ready = ([], [], [])
-            cmd = conn.recv(2048).decode('utf-8')
-            print("\nReceived command: " + str(cmd))
-            decodeCmd = json.loads(cmd)
-            if not decodeCmd:
-                pass
-            # Check if command field is driver: set "driver" field to "value"
-            elif decodeCmd["command"] == "set_valve":
-                # ljm.eWriteName(handle,config["driver_mapping"][str(decodeCmd["driver"])],decodeCmd["value"])
-                ljm.eWriteName(handle,"EIO0",decodeCmd["value"])                
-                print("Successful pin write!")
-            # Check if command is ignition
-            elif decodeCmd["command"] == "ignition":
-                #TODO ignition sequence helper call
-                print("ignition command received")
-                pass
-            # Check if command is "close"
-            elif decodeCmd["command"] == "close":
-                print("Stopping command listening")
-                closeLock.acquire()
-                close = 1
-                closeLock.release()
-                break
-
-        # else:
-            # print("\nNone found")
-        time.sleep(.005)
+        try:
+            ready = select.select([conn], [], [], .1)
+            if ready[0]:
+                ready = ([], [], [])
+                cmd = conn.recv(2048).decode('utf-8')
+                decodeCmd = json.loads(cmd)
+                if not decodeCmd:
+                    pass
+                print("\nReceived command: " + str(cmd))
+                # Check if command field is set_valve: set "driver" field to "value"
+                if decodeCmd["command"] == "set_valve":
+                    # ljm.eWriteName(handle,config["driver_mapping"][str(decodeCmd["driver"])],decodeCmd["value"])
+                    ljm.eWriteName(handle,"EIO0",decodeCmd["value"])                
+                    print("Successful pin write!")
+                # Check if command is ignition
+                elif decodeCmd["command"] == "ignition":
+                    #TODO ignition sequence helper call
+                    print("ignition command received")
+                    pass
+                # Check if command is "close"
+                elif decodeCmd["command"] == "close":
+                    print("Stopping command listening")
+                    closeLock.acquire()
+                    close = 1
+                    closeLock.release()
+                    break
+        except:
+            # If error, wait for data_to_dash thread to catch socket exception
+            # and update conn with updated value to restore. i.e. do nothing here
+            pass
+        # time.sleep(.005)
 
 # Dashboard sender
-def data_to_dash(conn,bufLock,closeLock,console = "",sensors = "",states = "",timestamp = ""):
+def data_to_dash(bufLock,closeLock,console = "",states = "",timestamp = ""):
     # Loop indefinitely, until universal "STOP" received
     #TODO proper error handling
     while True: 
+        global conn
         states = []
         # Reading current driver pin states
         # for driver in drivers:
         #     states.append(str(ljm.eReadName(handle,config["driver_mapping"][driver])))
-        # states.append(ljm.eReadName(handle,"EIO1"))
-        states.append(ljm.eReadAddress(handle,2008,2))
-
+        states.append(ljm.eReadName(handle,"EIO1"))
+        print("states",states)
         JSONData = {}
-        # Wait for access to dataBuf from main() thread
+        # Access to dataBuf from main() thread
         if bufLock.acquire(timeout = .01):
             JSONData['sensors'] = dataBuf[0]
             bufLock.release()
-        else: 
-            print("issue obtaining data lock")
         JSONData['timestamp'] = timestamp
         JSONData['states'] = states
         JSONData['console'] = console
         JSONObj = json.dumps(JSONData)  
-        # print("\nAttempting to send",console,"to dashboard")
+        print(JSONData['sensors'])
         try: 
             sendStr = JSONObj.encode('UTF-8')
             conn.send(len(sendStr).to_bytes(2,"big"))
             conn.sendall(sendStr)
-            # print("\nSuccessfully sent: ",JSONObj.encode('UTF-8'))          
-        except Exception as e:
-            print(e)
+        except:
             print("Connection issue! Waiting for reconnect before resend")
-            conn,_ = setup_socket()
+            setup_socket()
+            pass
         if closeLock.acquire(timeout = .01):
             close_hold = close
             closeLock.release()
@@ -127,11 +124,10 @@ def data_to_dash(conn,bufLock,closeLock,console = "",sensors = "",states = "",ti
 
 # Log data to Raspberry Pi
 def data_log(writer,sensors,sweepnum):
-    timestamps = np.linspace(sweepnum - 1,sweepnum,SAMPLE_RATE)
+    timestamps = np.linspace(sweepnum - 1,sweepnum-(1/SAMPLE_RATE),SAMPLE_RATE)
     sensorsR = np.asarray(sensors).reshape(SAMPLE_RATE,NUM_SENSORS)
     write_data = np.column_stack((np.transpose(timestamps),sensorsR))
     writer.writerows(write_data)
-    # print("\nBatch " + str(sweepnum) + " logged to Pi")
 
 def main(handle):
     info = ljm.getHandleInfo(handle)
@@ -144,18 +140,21 @@ def main(handle):
     aScanList = ljm.namesToAddresses(NUM_SENSORS, aScanListNames)[0]
     scanRate = SAMPLE_RATE
     scansPerRead = scanRate#check
-    conn,addr = setup_socket()
+    setup_socket()
     bufLock = Lock()
     closeLock = Lock()
+    # connLock = Lock()
     global dataBuf
     global close
     # Buffer for data slices for dashboard send
     dataBuf = [[]]
     # Value used to communicate stop-command status between threads
     close = 0
-    dashlistener = Thread(target = command_from_dash, args = (conn, ))
-    dashlistener.start()
-    
+    print("main",conn)
+    dataSender = Thread(target = data_to_dash, args = (bufLock,closeLock,"data", ))
+    dataSender.start()
+    dashListener = Thread(target = command_from_dash, args = (closeLock,))
+    dashListener.start()
     try:
         # Ensure triggered stream is disabled.
         ljm.eWriteName(handle, "STREAM_TRIGGER_INDEX", 0)
@@ -166,9 +165,9 @@ def main(handle):
         # All negative channels are single-ended, AIN0 range is +/-10V,
         # stream settling is 0 (default) and stream resolution index
         # is 0 (default).
-        aNames = ["AIN_ALL_NEGATIVE_CH", "AIN0_RANGE",
+        aNames = ["AIN0_NEGATIVE_CH", "AIN0_RANGE",
             "STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
-        aValues = [ljm.constants.GND, 10.0, 0, 0]
+        aValues = [1, 10.0, 0, 0]
         # Write the analog inputs' negative channels (when applicable), ranges,
         # stream settling time and stream resolution configuration.
         numFrames = len(aNames)
@@ -180,8 +179,6 @@ def main(handle):
         totSkip = 0  # Total skipped samples
         i = 0
         # Separate thread for sending to dashboard
-        dataSender = Thread(target = data_to_dash, args = (conn,bufLock,closeLock,"data", ))
-        dataSender.start()
         # Loop until exception or stop command
         while True:
             ret = ljm.eStreamRead(handle)
@@ -198,7 +195,7 @@ def main(handle):
             if bufLock.acquire(timeout = .005):
                 dataBuf[0] = []
                 for j in range(0, NUM_SENSORS):
-                    dataBuf[0].append( float(aData[j]))
+                    dataBuf[0].append(float(aData[j]))
                 bufLock.release()
             else: 
                 print("issue obtaining buflock")    
@@ -213,6 +210,8 @@ def main(handle):
                 closeCheck = close
                 closeLock.release()
                 if closeCheck == 1:
+                    dashListener.join()
+                    dataSender.join()
                     break
         ljm.eStreamStop(handle)
         ljm.close(handle)
@@ -220,8 +219,12 @@ def main(handle):
     except ljm.LJMError:
         ljme = sys.exc_info()[1]
         print(ljme)
+        s.close()
     except Exception:
         e = sys.exc_info()[1]
+        ljm.eStreamStop(handle)
+        ljm.close(handle)
+        s.close()
         print(e)
 
 if __name__ == '__main__':
@@ -238,13 +241,12 @@ if __name__ == '__main__':
     # Open and bind socket
     try: 
         handle = ljm.openS("T7", "USB", "ANY")
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        print("\nBinding socket to: " + str(HOST) + ":" + str(PORT))
-        s.bind((HOST,PORT))
-        print("===============================================================")
     except:
         print("Can't connect to LabJack device") 
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        print("\nBinding socket to: " + str(HOST) + ":" + str(PORT))
+        s.bind((HOST,PORT))
         main(handle)
         print("\nStream ended.")
     except ljm.LJMError:
@@ -260,4 +262,5 @@ if __name__ == '__main__':
             os._exit(130)
     except Exception:
         e = sys.exc_info()[1]
+        s.close()
         print(e)

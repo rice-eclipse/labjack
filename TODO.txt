@@ -1,6 +1,6 @@
 -Assign time-stamps to each received sensor value logged
 -Handle ignition sequence after receiving ign command
--Set up concurrent emergency shutoff conditions
+-Emergency shutoff setup locally on the device
 -Setup differential input analogs
 -Add a safe mode setting. If connection lost for some period of time 
 default to approachable mode
