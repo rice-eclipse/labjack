@@ -1,4 +1,3 @@
--Assign time-stamps to each received sensor value logged
 -Handle ignition sequence after receiving ign command
 -Emergency shutoff setup locally on the device
 -Setup differential input analogs
@@ -6,3 +5,4 @@
 default to approachable mode
 -Ensure command listener is working every time connection is toggled
 -Startup exception print
+-figure out issue with name read affecting pin states

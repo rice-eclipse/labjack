@@ -84,12 +84,11 @@ def command_from_dash(closeLock):
 # Dashboard sender
 def data_to_dash(bufLock,closeLock,console = "",states = "",timestamp = ""):
     # Loop indefinitely, until universal "STOP" received
-    #TODO proper error handling
     while True: 
         global conn
         states = []
         # Reading current driver pin states
-        # for driver in drivers:
+        # for driver in drivers: #TODO doesn't work for some reason
         #     states.append(str(ljm.eReadName(handle,config["driver_mapping"][driver])))
         states.append(ljm.eReadName(handle,"EIO1"))
         print("states",states)
@@ -136,21 +135,21 @@ def main(handle):
         (info[0], info[1], info[2], ljm.numberToIP(info[3]), info[4], info[5]))
     print("===============================================================")
     writer = open_file()
-    aScanListNames = list(config["sensor_mapping"].values())
+    aScanListNames = list(config["sensor_channel_mapping"].values())
     aScanList = ljm.namesToAddresses(NUM_SENSORS, aScanListNames)[0]
+    print(aScanListNames)
     scanRate = SAMPLE_RATE
-    scansPerRead = scanRate#check
+    scansPerRead = scanRate
     setup_socket()
+    # Locks for data race prevention
     bufLock = Lock()
     closeLock = Lock()
-    # connLock = Lock()
     global dataBuf
     global close
     # Buffer for data slices for dashboard send
     dataBuf = [[]]
     # Value used to communicate stop-command status between threads
     close = 0
-    print("main",conn)
     dataSender = Thread(target = data_to_dash, args = (bufLock,closeLock,"data", ))
     dataSender.start()
     dashListener = Thread(target = command_from_dash, args = (closeLock,))
@@ -158,23 +157,29 @@ def main(handle):
     try:
         # Ensure triggered stream is disabled.
         ljm.eWriteName(handle, "STREAM_TRIGGER_INDEX", 0)
-
         # Enabling internally-clocked stream.
         ljm.eWriteName(handle, "STREAM_CLOCK_SOURCE", 0)
-
-        # All negative channels are single-ended, AIN0 range is +/-10V,
-        # stream settling is 0 (default) and stream resolution index
-        # is 0 (default).
-        aNames = ["AIN0_NEGATIVE_CH", "AIN0_RANGE",
-            "STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
-        aValues = [1, 10.0, 0, 0]
+        chan_names = []
+        chan_vals = []
+        # Assign negative channels for load cells and strain gauges
+        for chan in config["sensor_negative_channels"].keys():
+            chan_names.append(config["sensor_channel_mapping"][chan] + "_NEGATIVE_CH")
+            chan_vals.append(int(config["sensor_negative_channels"][chan][3:]))
+            chan_names.append(config["sensor_channel_mapping"][chan] + "_RANGE")
+            chan_vals.append(.10)
+        aNames = chan_names + ["STREAM_RESOLUTION_INDEX"]
+        aValues = chan_vals + [0]
+        # aNames = ["STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
+        # aValues = [0, 0]
+        # aNames = ["AIN48_NEGATIVE_CH","STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
+        # aValues = [112,0, 0]
+        print("aNames: ",aNames,"aValues: ",aValues)
         # Write the analog inputs' negative channels (when applicable), ranges,
         # stream settling time and stream resolution configuration.
         numFrames = len(aNames)
         ljm.eWriteNames(handle, numFrames, aNames, aValues)
         scanRate = ljm.eStreamStart(handle, scansPerRead, NUM_SENSORS, aScanList, scanRate)
         print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
-        start = datetime.now()
         totScans = 0
         totSkip = 0  # Total skipped samples
         i = 0
@@ -200,8 +205,8 @@ def main(handle):
             else: 
                 print("issue obtaining buflock")    
             # Skipped scans indicate program struggling to keep up
-            # print("  Scans Skipped = %0.0f, Scan Backlogs: Device = %i, LJM = "
-                # "%i" % (curSkip/NUM_SENSORS, ret[1], ret[2]))
+            print("  Scans Skipped = %0.0f, Scan Backlogs: Device = %i, LJM = "
+                "%i" % (curSkip/NUM_SENSORS, ret[1], ret[2]))
             i += 1
             # Write values from this sweep to SD card
             data_log(writer,aData,i)
@@ -235,7 +240,7 @@ if __name__ == '__main__':
     HOST = config["general"]["HOST"]
     PORT = int(config["general"]["PORT"])
     SAMPLE_RATE = int(config["general"]["SAMPLE_RATE"])
-    NUM_SENSORS = int(config["general"]["NUM_SENSORS"])
+    NUM_SENSORS = len(config["sensor_channel_mapping"].keys())
     NUM_DRIVERS = int(config["general"]["NUM_DRIVERS"])
     drivers = list(config["driver_mapping"].keys())
     # Open and bind socket
