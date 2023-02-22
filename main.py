@@ -1,9 +1,10 @@
-#Concept testing for interleaved logging, command handling, and dashboard
-#data relay
+#Main driver code for Raspberry Pi3
 #
-#Spencer Darwall, ChatGPT,
+#Multithreaded logging, command listening/handling, and dashbaord uploading
+#Configured by configurations.ini
+#
+#Spencer Darwall
 #2/7/23
-#
 
 from datetime import datetime
 from labjack import ljm
@@ -16,8 +17,10 @@ import select
 import numpy as np
 import configparser
 import json
+from threading import Thread
+from threading import Lock
 
-# Method to read config file settings
+# Read config file settings
 def read_config():
     config = configparser.ConfigParser()
     config.read('configurations.ini')
@@ -25,187 +28,244 @@ def read_config():
 
 # Open socket connection    
 def setup_socket():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        print("\nBinding socket to: " + str(HOST) + ":" + str(PORT))
-        s.bind((HOST,PORT))
-        print("\nWaiting for incoming connection...")
-        s.listen()
-        conn, addr = s.accept()
-        print("\nFound incoming connection")
-        return conn, addr
+    print("\nWaiting for connection request...")
+    s.listen()
+    global conn
+    conn, _ = s.accept()
 
-# Send data points to dashboard
-def command_from_dash(conn):
-    with conn:
-        print("\nChecking for command from dashboard")
-        print(conn)
-        ready = select.select([conn], [], [], 1)
-        print("CHECKPOINT")
-        if ready[0]:
-            cmd = conn.recv(1024).decode('utf-8')
-            print("\nReceived command: " + str(cmd))
-            if not cmd:
-                return "close" 
-            return cmd 
-        else:
-            print("\nNone found")
-            return "nothing" 
+# Create file writer
+def open_file():
+    filename = config["general"]["filename"]
+    os.remove(filename + ".csv") #TODO ensure new filename each run (get timestamp from dash?)
+    file = open(filename + ".csv", "x")
+    writer = csv.writer(file)
+    # print(json.loads(config.get("general","col_format")))
+    writer.writerow(["Time (s)","LC1","LC2","LC3","LC4","SG1","SG2","PT1",\
+    "PT2","PT3","PT4","TC1","TC2","TC3","TC4"])
+    return writer
 
-# Receive commands from dashboard
-def data_to_dash(conn,console,sensors = "",states = "",timestamp = ""):
-    """
-    Encode data into JSON object with the following fields:
-    - console key:
-        - 1: Succesful initial connection
-        - 2: TODO
-    TODO better error handling
-    """
-    JSONData = {}
-    JSONData['sensors'] = sensors
-    JSONData['timestamp'] = timestamp #int, sweep num
-    JSONData['states'] = states
-    JSONData['console'] = console
-    JSONObj = json.dumps(JSONData)
-    with conn:  
-        print("\nAttempting to send data to dashboard")
-        try: 
-            conn.sendall(JSONObj.encode('UTF-8'))
-            print("\ndata successfully sent")
-            return 0
+# Dashboard listener 
+def command_from_dash(closeLock):
+    # Loop indefinitely, until universal "STOP" received
+    #TODO proper error handling
+    while True:
+        try:
+            ready = select.select([conn], [], [], .1)
+            if ready[0]:
+                ready = ([], [], [])
+                cmd = conn.recv(2048).decode('utf-8')
+                decodeCmd = json.loads(cmd)
+                if not decodeCmd:
+                    pass
+                print("\nReceived command: " + str(cmd))
+                # Check if command field is set_valve: set "driver" field to "value"
+                if decodeCmd["command"] == "set_valve":
+                    # ljm.eWriteName(handle,config["driver_mapping"][str(decodeCmd["driver"])],decodeCmd["value"])
+                    ljm.eWriteName(handle,"EIO0",decodeCmd["value"])                
+                    print("Successful pin write!")
+                # Check if command is ignition
+                elif decodeCmd["command"] == "ignition":
+                    #TODO ignition sequence helper call
+                    print("ignition command received")
+                    pass
+                # Check if command is "close"
+                elif decodeCmd["command"] == "close":
+                    print("Stopping command listening")
+                    closeLock.acquire()
+                    close = 1
+                    closeLock.release()
+                    break
         except:
-            print("\nexception raised in data sent")
-            return -1
+            # If error, wait for data_to_dash thread to catch socket exception
+            # and update conn with updated value to restore. i.e. do nothing here
+            pass
+        # time.sleep(.005)
+
+# Dashboard sender
+def data_to_dash(bufLock,closeLock,console = "",states = "",timestamp = ""):
+    # Loop indefinitely, until universal "STOP" received
+    while True: 
+        global conn
+        states = []
+        # Reading current driver pin states
+        # for driver in drivers: #TODO doesn't work for some reason
+        #     states.append(str(ljm.eReadName(handle,config["driver_mapping"][driver])))
+        states.append(ljm.eReadName(handle,"EIO1"))
+        print("states",states)
+        JSONData = {}
+        # Access to dataBuf from main() thread
+        if bufLock.acquire(timeout = .01):
+            JSONData['sensors'] = dataBuf[0]
+            bufLock.release()
+        JSONData['timestamp'] = timestamp
+        JSONData['states'] = states
+        JSONData['console'] = console
+        JSONObj = json.dumps(JSONData)  
+        print(JSONData['sensors'])
+        try: 
+            sendStr = JSONObj.encode('UTF-8')
+            conn.send(len(sendStr).to_bytes(2,"big"))
+            conn.sendall(sendStr)
+        except:
+            print("Connection issue! Waiting for reconnect before resend")
+            setup_socket()
+            pass
+        if closeLock.acquire(timeout = .01):
+            close_hold = close
+            closeLock.release()
+            if close == 1:
+                print("Stopped command sending")
+                break
+        else:
+            print("issue obtaining close lock")
+        # Sleep for arbitrary amount of time (default 1s)
+        time.sleep(int(config["general"]["dash_send_delay_ms"]) / 1000)
 
 # Log data to Raspberry Pi
-def local_log(writer,sensors,sweepnum):
-    timestamps = np.linspace(sweepnum,sweepnum + 1,SAMPLE_RATE)
+def data_log(writer,sensors,sweepnum):
+    timestamps = np.linspace(sweepnum - 1,sweepnum-(1/SAMPLE_RATE),SAMPLE_RATE)
     sensorsR = np.asarray(sensors).reshape(SAMPLE_RATE,NUM_SENSORS)
     write_data = np.column_stack((np.transpose(timestamps),sensorsR))
     writer.writerows(write_data)
-    print("Batch logged to Pi")
 
 def main(handle):
     info = ljm.getHandleInfo(handle)
-    print("==============================================\
-    \nStarting LabJack streaming, logging and command handling\
-    \n==============================================")
     print("Opened LabJack with Device type: %i, Connection type: %i,\n"
         "Serial number: %i, IP address: %s, Port: %i,\nMax bytes per MB: %i" %
         (info[0], info[1], info[2], ljm.numberToIP(info[3]), info[4], info[5]))
-
-    aScanListNames = list(config["sensor_mapping"].values())
-    filename = config["general"]["filename"]
-    os.remove(filename + ".csv") #rep w new filename each time
-    file = open(filename + ".csv", "x")
-    writer = csv.writer(file)
-    writer.writerow(["Time (s)","LC1","LC2","LC3","LC4","SG1","SG2","PT1",\
-    "PT2","PT3","PT4","TC1","TC2","TC3","TC4"]) #make ms
+    print("===============================================================")
+    writer = open_file()
+    aScanListNames = list(config["sensor_channel_mapping"].values())
     aScanList = ljm.namesToAddresses(NUM_SENSORS, aScanListNames)[0]
-    # print(ljm.namesToAddresses(NUM_SENSORS, aScanListNames))
+    print(aScanListNames)
     scanRate = SAMPLE_RATE
-    scansPerRead = scanRate#check
-    conn,addr = setup_socket()
-    data_to_dash(conn,"1")
+    scansPerRead = scanRate
+    setup_socket()
+    # Locks for data race prevention
+    bufLock = Lock()
+    closeLock = Lock()
+    global dataBuf
+    global close
+    # Buffer for data slices for dashboard send
+    dataBuf = [[]]
+    # Value used to communicate stop-command status between threads
+    close = 0
+    dataSender = Thread(target = data_to_dash, args = (bufLock,closeLock,"data", ))
+    dataSender.start()
+    dashListener = Thread(target = command_from_dash, args = (closeLock,))
+    dashListener.start()
     try:
         # Ensure triggered stream is disabled.
         ljm.eWriteName(handle, "STREAM_TRIGGER_INDEX", 0)
-
         # Enabling internally-clocked stream.
         ljm.eWriteName(handle, "STREAM_CLOCK_SOURCE", 0)
-
-        # All negative channels are single-ended, AIN0 range is +/-10V,
-        # stream settling is 0 (default) and stream resolution index
-        # is 0 (default).
-        aNames = ["AIN_ALL_NEGATIVE_CH", "AIN0_RANGE",
-            "STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
-        aValues = [ljm.constants.GND, 10.0, 0, 0]
-
+        chan_names = []
+        chan_vals = []
+        # Assign negative channels for load cells and strain gauges
+        for chan in config["sensor_negative_channels"].keys():
+            chan_names.append(config["sensor_channel_mapping"][chan] + "_NEGATIVE_CH")
+            chan_vals.append(int(config["sensor_negative_channels"][chan][3:]))
+            chan_names.append(config["sensor_channel_mapping"][chan] + "_RANGE")
+            chan_vals.append(.10)
+        aNames = chan_names + ["STREAM_RESOLUTION_INDEX"]
+        aValues = chan_vals + [0]
+        # aNames = ["STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
+        # aValues = [0, 0]
+        # aNames = ["AIN48_NEGATIVE_CH","STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
+        # aValues = [112,0, 0]
+        print("aNames: ",aNames,"aValues: ",aValues)
         # Write the analog inputs' negative channels (when applicable), ranges,
         # stream settling time and stream resolution configuration.
         numFrames = len(aNames)
         ljm.eWriteNames(handle, numFrames, aNames, aValues)
         scanRate = ljm.eStreamStart(handle, scansPerRead, NUM_SENSORS, aScanList, scanRate)
         print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
-        start = datetime.now()
         totScans = 0
         totSkip = 0  # Total skipped samples
         i = 0
-        #Loop until exception or stop command
+        # Separate thread for sending to dashboard
+        # Loop until exception or stop command
         while True:
             ret = ljm.eStreamRead(handle)
             aData = ret[0]
-            print("\nCurrent batch size: ",len(aData))
             scans = len(aData) / NUM_SENSORS
             totScans += scans
-
             # Count the skipped samples which are indicated by -9999 values. Missed
             # samples occur after a device's stream buffer overflows and are
-            # reported after auto-recover mode ends.
+            # reported after auto-recover mode ends. 
             curSkip = aData.count(-9999.0)
             totSkip += curSkip
             print("\nBatch number: %i" % i)
-            sendData = ""
-            for j in range(0, NUM_SENSORS - 1):
-                sendData += str(aData[j]) + ","
-            sendData += str(aData[NUM_SENSORS - 1])
+            # Try to write to the buffer or continuing without
+            if bufLock.acquire(timeout = .005):
+                dataBuf[0] = []
+                for j in range(0, NUM_SENSORS):
+                    dataBuf[0].append(float(aData[j]))
+                bufLock.release()
+            else: 
+                print("issue obtaining buflock")    
+            # Skipped scans indicate program struggling to keep up
             print("  Scans Skipped = %0.0f, Scan Backlogs: Device = %i, LJM = "
                 "%i" % (curSkip/NUM_SENSORS, ret[1], ret[2]))
             i += 1
-            #writing pin values corresponding to command received
-            """
-            cmd = command_from_dash(conn) #"1-6,(0 -> close, 1 -> open)"
-            if cmd[0] in config["driver_mapping"].keys() and cmd[0] != "6":
-                ljm.eWriteName(handle,config["driver_mapping"][cmd[0]],cmd[1])
-            elif cmd[0] == "6":
-                #TODO ignition sequence helper call
-                pass
-            elif cmd[0] == "close":
-                print("Closing connection")
-                break
-            """
-            states = []
-            #reading current valve pin states
-            for driver in config["driver_mapping"].keys():
-                states.append(ljm.eReadName(handle,config["driver_mapping"][driver]))
-            data_to_dash(conn,sendData,states)
-            #write values from this sweep to SD card
-            local_log(writer,aData,i)
-        end = datetime.now()
-        print("\nTotal scans: %i" % (totScans))
-        tt = (end - start).seconds + float((end - start).microseconds) / 1000000
-        print("Time taken: %f seconds" % (tt))
-        print("LJM Scan Rate: %f scans/second" % (scanRate))
-        print("Timed Scan Rate: %f scans/second" % (totScans / tt))
-        print("Timed Sample Rate: %f samples/second" % (totScans * NUM_SENSORS / tt))
-        print("Skipped scans: %0.0f" % (totSkip / NUM_SENSORS))
+            # Write values from this sweep to SD card
+            data_log(writer,aData,i)
+            # Check close condition
+            if closeLock.acquire(timeout = .01):
+                closeCheck = close
+                closeLock.release()
+                if closeCheck == 1:
+                    dashListener.join()
+                    dataSender.join()
+                    break
+        ljm.eStreamStop(handle)
+        ljm.close(handle)
+        s.close()
     except ljm.LJMError:
         ljme = sys.exc_info()[1]
         print(ljme)
+        s.close()
     except Exception:
         e = sys.exc_info()[1]
+        ljm.eStreamStop(handle)
+        ljm.close(handle)
+        s.close()
         print(e)
 
 if __name__ == '__main__':
+    print("===============================================================\
+    \nStarting LabJack streaming, logging and remote command handling\
+    \n===============================================================")
     config = read_config()
     HOST = config["general"]["HOST"]
     PORT = int(config["general"]["PORT"])
     SAMPLE_RATE = int(config["general"]["SAMPLE_RATE"])
-    NUM_SENSORS = int(config["general"]["NUM_SENSORS"])
+    NUM_SENSORS = len(config["sensor_channel_mapping"].keys())
     NUM_DRIVERS = int(config["general"]["NUM_DRIVERS"])
-    handle = ljm.openS("T7", "USB", "ANY")
+    drivers = list(config["driver_mapping"].keys())
+    # Open and bind socket
+    try: 
+        handle = ljm.openS("T7", "USB", "ANY")
+    except:
+        print("Can't connect to LabJack device") 
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        print("\nBinding socket to: " + str(HOST) + ":" + str(PORT))
+        s.bind((HOST,PORT))
         main(handle)
-        ljm.eStreamStop(handle)
         print("\nStream ended.")
     except ljm.LJMError:
         ljme = sys.exc_info()[1]
         print(ljme)
     except KeyboardInterrupt:
+        print("Keyboard stop")
         ljm.close(handle)
+        s.close()
         try:
             sys.exit(130)
         except:
             os._exit(130)
     except Exception:
         e = sys.exc_info()[1]
+        s.close()
         print(e)
