@@ -2,6 +2,5 @@
 -Emergency shutoff setup locally on the device
 -Add a safe mode setting. If connection lost for some period of time 
 default to approachable mode
--Ensure command listener is working every time connection is toggled
--Startup exception print
+-General try-exception improvements 
 -figure out issue with name read affecting pin states

@@ -4,7 +4,7 @@
 #Configured by configurations.ini
 #
 #Spencer Darwall
-#2/7/23
+#2/21/23
 
 from datetime import datetime
 from labjack import ljm
@@ -26,7 +26,7 @@ def read_config():
     config.read('configurations.ini')
     return config
 
-# Open socket connection    
+# Configure socket connection    
 def setup_socket():
     print("\nWaiting for connection request...")
     s.listen()
@@ -39,15 +39,14 @@ def open_file():
     os.remove(filename + ".csv") #TODO ensure new filename each run (get timestamp from dash?)
     file = open(filename + ".csv", "x")
     writer = csv.writer(file)
-    # print(json.loads(config.get("general","col_format")))
     writer.writerow(["Time (s)","LC1","LC2","LC3","LC4","SG1","SG2","PT1",\
     "PT2","PT3","PT4","TC1","TC2","TC3","TC4"])
     return writer
 
 # Dashboard listener 
 def command_from_dash(closeLock):
-    # Loop indefinitely, until universal "STOP" received
     #TODO proper error handling
+    global close
     while True:
         try:
             ready = select.select([conn], [], [], .1)
@@ -76,14 +75,12 @@ def command_from_dash(closeLock):
                     closeLock.release()
                     break
         except:
-            # If error, wait for data_to_dash thread to catch socket exception
-            # and update conn with updated value to restore. i.e. do nothing here
+            # If error, wait for data_to_dash thread to throw socket exception
+            # and update conn with new values
             pass
-        # time.sleep(.005)
 
 # Dashboard sender
 def data_to_dash(bufLock,closeLock,console = "",states = "",timestamp = ""):
-    # Loop indefinitely, until universal "STOP" received
     while True: 
         global conn
         states = []
@@ -113,7 +110,7 @@ def data_to_dash(bufLock,closeLock,console = "",states = "",timestamp = ""):
         if closeLock.acquire(timeout = .01):
             close_hold = close
             closeLock.release()
-            if close == 1:
+            if close_hold == 1:
                 print("Stopped command sending")
                 break
         else:
@@ -137,7 +134,6 @@ def main(handle):
     writer = open_file()
     aScanListNames = list(config["sensor_channel_mapping"].values())
     aScanList = ljm.namesToAddresses(NUM_SENSORS, aScanListNames)[0]
-    print(aScanListNames)
     scanRate = SAMPLE_RATE
     scansPerRead = scanRate
     setup_socket()
@@ -159,27 +155,18 @@ def main(handle):
         ljm.eWriteName(handle, "STREAM_TRIGGER_INDEX", 0)
         # Enabling internally-clocked stream.
         ljm.eWriteName(handle, "STREAM_CLOCK_SOURCE", 0)
-        chan_names = []
-        chan_vals = []
-        # Assign negative channels for load cells and strain gauges
+        aNames = ["STREAM_RESOLUTION_INDEX","STREAM_SETTLING_US",]
+        aValues = [0,0]
+        # Assign negative channels for load cells and strain gauges, set inamp gain setting
         for chan in config["sensor_negative_channels"].keys():
-            chan_names.append(config["sensor_channel_mapping"][chan] + "_NEGATIVE_CH")
-            chan_vals.append(int(config["sensor_negative_channels"][chan][3:]))
-            chan_names.append(config["sensor_channel_mapping"][chan] + "_RANGE")
-            chan_vals.append(.10)
-        aNames = chan_names + ["STREAM_RESOLUTION_INDEX"]
-        aValues = chan_vals + [0]
-        # aNames = ["STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
-        # aValues = [0, 0]
-        # aNames = ["AIN48_NEGATIVE_CH","STREAM_SETTLING_US", "STREAM_RESOLUTION_INDEX"]
-        # aValues = [112,0, 0]
+            aNames.append(config["sensor_channel_mapping"][chan] + "_NEGATIVE_CH")
+            aValues.append(int(config["sensor_negative_channels"][chan][3:]))
+            aNames.append(config["sensor_channel_mapping"][chan] + "_RANGE")
+            aValues.append(.10) # Sets gain of instrumentation amplifiers to 100x
         print("aNames: ",aNames,"aValues: ",aValues)
-        # Write the analog inputs' negative channels (when applicable), ranges,
-        # stream settling time and stream resolution configuration.
         numFrames = len(aNames)
         ljm.eWriteNames(handle, numFrames, aNames, aValues)
         scanRate = ljm.eStreamStart(handle, scansPerRead, NUM_SENSORS, aScanList, scanRate)
-        print("\nStream started with a scan rate of %0.0f Hz." % scanRate)
         totScans = 0
         totSkip = 0  # Total skipped samples
         i = 0
@@ -253,7 +240,7 @@ if __name__ == '__main__':
         print("\nBinding socket to: " + str(HOST) + ":" + str(PORT))
         s.bind((HOST,PORT))
         main(handle)
-        print("\nStream ended.")
+        print("\nShutting down...")
     except ljm.LJMError:
         ljme = sys.exc_info()[1]
         print(ljme)
