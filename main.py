@@ -134,6 +134,7 @@ def main(handle):
     writer = open_file()
     aScanListNames = list(config["sensor_channel_mapping"].values())
     aScanList = ljm.namesToAddresses(NUM_SENSORS, aScanListNames)[0]
+    print(aScanList)
     scanRate = SAMPLE_RATE
     scansPerRead = scanRate
     setup_socket()
@@ -150,74 +151,87 @@ def main(handle):
     dataSender.start()
     dashListener = Thread(target = command_from_dash, args = (closeLock,))
     dashListener.start()
-    try:
-        # Ensure triggered stream is disabled.
-        ljm.eWriteName(handle, "STREAM_TRIGGER_INDEX", 0)
-        # Enabling internally-clocked stream.
-        ljm.eWriteName(handle, "STREAM_CLOCK_SOURCE", 0)
-        aNames = ["STREAM_RESOLUTION_INDEX","STREAM_SETTLING_US",]
-        aValues = [0,0]
-        # Assign negative channels for load cells and strain gauges, set inamp gain setting
-        for chan in config["sensor_negative_channels"].keys():
-            aNames.append(config["sensor_channel_mapping"][chan] + "_NEGATIVE_CH")
-            aValues.append(int(config["sensor_negative_channels"][chan][3:]))
-            aNames.append(config["sensor_channel_mapping"][chan] + "_RANGE")
-            aValues.append(.10) # Sets gain of instrumentation amplifiers to 100x
-        print("aNames: ",aNames,"aValues: ",aValues)
-        numFrames = len(aNames)
-        ljm.eWriteNames(handle, numFrames, aNames, aValues)
-        scanRate = ljm.eStreamStart(handle, scansPerRead, NUM_SENSORS, aScanList, scanRate)
-        totScans = 0
-        totSkip = 0  # Total skipped samples
-        i = 0
-        # Separate thread for sending to dashboard
-        # Loop until exception or stop command
-        while True:
-            ret = ljm.eStreamRead(handle)
-            aData = ret[0]
-            scans = len(aData) / NUM_SENSORS
-            totScans += scans
-            # Count the skipped samples which are indicated by -9999 values. Missed
-            # samples occur after a device's stream buffer overflows and are
-            # reported after auto-recover mode ends. 
-            curSkip = aData.count(-9999.0)
-            totSkip += curSkip
-            print("\nBatch number: %i" % i)
-            # Try to write to the buffer or continuing without
-            if bufLock.acquire(timeout = .005):
-                dataBuf[0] = []
-                for j in range(0, NUM_SENSORS):
-                    dataBuf[0].append(float(aData[j]))
-                bufLock.release()
-            else: 
-                print("issue obtaining buflock")    
-            # Skipped scans indicate program struggling to keep up
-            print("  Scans Skipped = %0.0f, Scan Backlogs: Device = %i, LJM = "
-                "%i" % (curSkip/NUM_SENSORS, ret[1], ret[2]))
-            i += 1
-            # Write values from this sweep to SD card
-            data_log(writer,aData,i)
-            # Check close condition
-            if closeLock.acquire(timeout = .01):
-                closeCheck = close
-                closeLock.release()
-                if closeCheck == 1:
-                    dashListener.join()
-                    dataSender.join()
-                    break
-        ljm.eStreamStop(handle)
-        ljm.close(handle)
-        s.close()
-    except ljm.LJMError:
-        ljme = sys.exc_info()[1]
-        print(ljme)
-        s.close()
-    except Exception:
-        e = sys.exc_info()[1]
-        ljm.eStreamStop(handle)
-        ljm.close(handle)
-        s.close()
-        print(e)
+    # try:
+    # Ensure triggered stream is disabled.
+    ljm.eWriteName(handle, "STREAM_TRIGGER_INDEX", 0)
+    # Enabling internally-clocked stream.
+    ljm.eWriteName(handle, "STREAM_CLOCK_SOURCE", 0)
+    names = []
+    values = []
+    # for chan in config["sensor_channel_mapping"].keys():
+    #     if chan in config["sensor_negative_channels"].keys():
+    #         names.append(config["sensor_channel_mapping"][chan] + "_NEGATIVE_CH")
+    #         values.append(int(config["sensor_negative_channels"][chan][3:]))
+    #         names.append(config["sensor_channel_mapping"][chan] + "_RANGE")
+    #         values.append(1) # Sets gain of instrumentation amplifiers to 100x
+    #     # else:
+    #         # names.append(config["sensor_channel_mapping"][chan] + "_RANGE")
+    #         # values.append(10) # Sets gain of instrumentation amplifiers to 100x
+    # Assign negative channels for load cells and strain gauges, set inamp gain setting
+    for chan in config["sensor_negative_channels"].keys():
+        names.append(config["sensor_channel_mapping"][chan] + "_NEGATIVE_CH")
+        values.append(int(config["sensor_negative_channels"][chan][3:]))
+        names.append(config["sensor_channel_mapping"][chan] + "_RANGE")
+        values.append(1) # Sets gain of instrumentation amplifiers to 100x
+    aNames = names + ["STREAM_RESOLUTION_INDEX","STREAM_SETTLING_US"]
+    aValues = values + [0,0]
+    print("aNames: ",aNames,"aValues: ",aValues)
+    numFrames = len(aNames)
+    print(numFrames)
+    ljm.eWriteNames(handle, numFrames, aNames, aValues)
+    print("number of sensors",NUM_SENSORS,"scan list",aScanList,"scans per read",scansPerRead,"scanrate",scanRate)
+    scanRate = ljm.eStreamStart(handle, scansPerRead, NUM_SENSORS, aScanList, scanRate)
+    totScans = 0
+    totSkip = 0  # Total skipped samples
+    i = 0
+    # Separate thread for sending to dashboard
+    # Loop until exception or stop command
+    while True:
+        ret = ljm.eStreamRead(handle)
+        aData = ret[0]
+        scans = len(aData) / NUM_SENSORS
+        totScans += scans
+        # Count the skipped samples which are indicated by -9999 values. Missed
+        # samples occur after a device's stream buffer overflows and are
+        # reported after auto-recover mode ends. 
+        curSkip = aData.count(-9999.0)
+        totSkip += curSkip
+        print("\nBatch number: %i" % i)
+        # Try to write to the buffer or continuing without
+        if bufLock.acquire(timeout = .005):
+            dataBuf[0] = []
+            for j in range(0, NUM_SENSORS):
+                dataBuf[0].append(float(aData[j]))
+            bufLock.release()
+        else: 
+            print("issue obtaining buflock")    
+        # Skipped scans indicate program struggling to keep up
+        print("  Scans Skipped = %0.0f, Scan Backlogs: Device = %i, LJM = "
+            "%i" % (curSkip/NUM_SENSORS, ret[1], ret[2]))
+        i += 1
+        # Write values from this sweep to SD card
+        data_log(writer,aData,i)
+        # Check close condition
+        if closeLock.acquire(timeout = .01):
+            closeCheck = close
+            closeLock.release()
+            if closeCheck == 1:
+                dashListener.join()
+                dataSender.join()
+                break
+    #     ljm.eStreamStop(handle)
+    #     ljm.close(handle)
+    #     s.close()
+    # except ljm.LJMError:
+    #     ljme = sys.exc_info()[1]
+    #     print(ljme)
+    #     s.close()
+    # except Exception:
+    #     e = sys.exc_info()[1]
+    #     ljm.eStreamStop(handle)
+    #     ljm.close(handle)
+    #     s.close()
+    #     print(e)
 
 if __name__ == '__main__':
     print("===============================================================\
@@ -227,7 +241,9 @@ if __name__ == '__main__':
     HOST = config["general"]["HOST"]
     PORT = int(config["general"]["PORT"])
     SAMPLE_RATE = int(config["general"]["SAMPLE_RATE"])
+    print(SAMPLE_RATE)
     NUM_SENSORS = len(config["sensor_channel_mapping"].keys())
+    print(NUM_SENSORS)
     NUM_DRIVERS = int(config["general"]["NUM_DRIVERS"])
     drivers = list(config["driver_mapping"].keys())
     # Open and bind socket
