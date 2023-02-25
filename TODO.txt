@@ -4,3 +4,5 @@
 default to approachable mode
 -General try-exception improvements 
 -figure out issue with name read affecting pin states
+-Stream clock timestamps for data labelling
+-Internal voltage to unit conversion

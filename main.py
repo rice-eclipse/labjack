@@ -241,9 +241,7 @@ if __name__ == '__main__':
     HOST = config["general"]["HOST"]
     PORT = int(config["general"]["PORT"])
     SAMPLE_RATE = int(config["general"]["SAMPLE_RATE"])
-    print(SAMPLE_RATE)
     NUM_SENSORS = len(config["sensor_channel_mapping"].keys())
-    print(NUM_SENSORS)
     NUM_DRIVERS = int(config["general"]["NUM_DRIVERS"])
     drivers = list(config["driver_mapping"].keys())
     # Open and bind socket
