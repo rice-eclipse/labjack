@@ -78,6 +78,29 @@ def command_from_dash(closeLock):
             # and update conn with new values
             pass
 
+# Convert measurements from volts to relevant units for each sensor
+def vconv(sensorsR):
+    if sensorsR.size == 0: return []
+    n_sensors = sensorsR.copy()
+    for i, chan in enumerate(list(config['sensor_channel_mapping'].keys())):
+        if chan[:6] == "thermo":
+            if len(n_sensors.shape) == 2:
+                n_sensors[:,i] = np.round((sensorsR[:,i] - 1.25)/.005,2)
+            elif len(n_sensors.shape) == 1:
+                n_sensors[i] = np.round((sensorsR[i] - 1.25)/.005,2)
+        elif chan[:4] ==  "load":
+            if len(n_sensors.shape) == 2:
+                n_sensors[:,i] = np.round((sensorsR[:,i])*2*34500/5,1)
+            elif len(n_sensors.shape) == 1:
+                n_sensors[i] = np.round((sensorsR[i])*2*34500/5,1)
+        elif chan[:4] ==  "pres":
+            if len(n_sensors.shape) == 2:
+                n_sensors[:,i] = np.round(((sensorsR[:,i] - .472) * 2640.36) + 15,2)
+            elif len(n_sensors.shape) == 1:
+                n_sensors[i] = np.round(((sensorsR[i] - .472) * 2640.36) + 15,2)
+    return n_sensors.tolist()
+
+
 # Dashboard sender
 def data_to_dash(bufLock,closeLock,console = "",states = "",timestamp = ""):
     while True: 
@@ -91,7 +114,7 @@ def data_to_dash(bufLock,closeLock,console = "",states = "",timestamp = ""):
         JSONData = {}
         # Access to dataBuf from main() thread
         if bufLock.acquire(timeout = .01):
-            JSONData['sensors'] = dataBuf[0]
+            JSONData['sensors'] = vconv(np.asarray(dataBuf[0]))
             bufLock.release()
         JSONData['timestamp'] = timestamp
         JSONData['states'] = states
@@ -118,13 +141,14 @@ def data_to_dash(bufLock,closeLock,console = "",states = "",timestamp = ""):
 
 # Log data to Raspberry Pi
 def data_log(writer,sensors,sweepnum):
-    timestamps = np.linspace(sweepnum - 1,sweepnum-(1/SAMPLE_RATE),SAMPLE_RATE)
-    sensorsR = np.asarray(sensors).reshape(SAMPLE_RATE,NUM_CHANNELS)
-    write_data = np.column_stack((np.transpose(timestamps),sensorsR))
+    timestamps = np.linspace((sweepnum - 1)/reads_per_sec,(sweepnum-(1/SAMPLE_RATE))/reads_per_sec\
+    ,SAMPLE_RATE // reads_per_sec)
+    sensorsR = np.asarray(sensors).reshape(SAMPLE_RATE // reads_per_sec,num_channels)
+    write_data = np.column_stack((np.transpose(timestamps),vconv(sensorsR)))
     writer.writerows(write_data)
 
 def main(handle):
-    global NUM_CHANNELS
+    global reads_per_sec
     info = ljm.getHandleInfo(handle)
     print("Opened LabJack with Device type: %i, Connection type: %i,\n"
         "Serial number: %i, IP address: %s, Port: %i,\nMax bytes per MB: %i" %
@@ -133,12 +157,15 @@ def main(handle):
     for i in range(1,len(list(config['driver_mapping'].keys())) + 1):
         ljm.eWriteName(handle,config['driver_mapping'][str(i)],0.0)
     writer = open_file()
-    # NUM_CHANNELS += 2
-    # aScanListNames = ["CORE_TIMER","STREAM_DATA_CAPTURE_16"]
+    # num_channels += 2
+    # aScanListNames = ["SYSTEM_COUNTER_10KHZ","STREAM_DATA_CAPTURE_16"]
     aScanListNames = list(config["sensor_channel_mapping"].values())
-    aScanList = ljm.namesToAddresses(NUM_CHANNELS, aScanListNames)[0]
+    aScanList = ljm.namesToAddresses(num_channels, aScanListNames)[0]
     scanRate = SAMPLE_RATE
-    scansPerRead = scanRate 
+    if (reads_per_sec > scanRate): 
+        print("[ERR] Attempting more reads per scan than samples per second! Lowering RPS to sample rate")
+        reads_per_sec = scanRate
+    scansPerRead = scanRate // reads_per_sec
     setup_socket()
     # Locks for data race prevention
     bufLock = Lock()
@@ -169,12 +196,9 @@ def main(handle):
         values.append(1) # Sets gain of instrumentation amplifiers to 10x
     aNames = names + ["STREAM_RESOLUTION_INDEX","STREAM_SETTLING_US"]
     aValues = values + [0,0]
-    print("aNames: ",aNames,"aValues: ",aValues)
     numFrames = len(aNames)
-    print(numFrames)
     ljm.eWriteNames(handle, numFrames, aNames, aValues)
-    print("number of sensors",NUM_CHANNELS,"scan list",aScanList,"scans per read",scansPerRead,"scanrate",scanRate)
-    scanRate = ljm.eStreamStart(handle, scansPerRead, NUM_CHANNELS, aScanList, scanRate)
+    scanRate = ljm.eStreamStart(handle, scansPerRead, num_channels, aScanList, scanRate)
     totScans = 0
     totSkip = 0  # Total skipped samples
     i = 0
@@ -183,25 +207,25 @@ def main(handle):
     while True:
         ret = ljm.eStreamRead(handle)
         aData = ret[0]
-        scans = len(aData) / NUM_CHANNELS
+        scans = len(aData) / num_channels
         totScans += scans
         # Count the skipped samples which are indicated by -9999 values. Missed
         # samples occur after a device's stream buffer overflows and are
         # reported after auto-recover mode ends. 
         curSkip = aData.count(-9999.0)
         totSkip += curSkip
-        print("\nBatch number: %i" % i)
+        if (i % 1000 == 0): print("\nBatch number: %i" % i)
         # Try to write to the buffer or continuing without
         if bufLock.acquire(timeout = .005):
             dataBuf[0] = []
-            for j in range(0, NUM_CHANNELS):
+            for j in range(0, num_channels):
                 dataBuf[0].append(float(aData[j]))
             bufLock.release()
         else: 
             print("issue obtaining buflock")    
         # Skipped scans indicate program struggling to keep up
         # print("  Scans Skipped = %0.0f, Scan Backlogs: Device = %i, LJM = "
-        #     "%i" % (curSkip/NUM_CHANNELS, ret[1], ret[2]))
+        #     "%i" % (curSkip/num_channels, ret[1], ret[2]))
         i += 1
         # Write values from this sweep to SD card
         data_log(writer,aData,i)
@@ -235,8 +259,9 @@ if __name__ == '__main__':
     HOST = config["general"]["HOST"]
     PORT = int(config["general"]["PORT"])
     SAMPLE_RATE = int(config["general"]["SAMPLE_RATE"])
-    NUM_CHANNELS = len(config["sensor_channel_mapping"].keys())
+    num_channels = len(config["sensor_channel_mapping"].keys())
     NUM_DRIVERS = int(config["general"]["NUM_DRIVERS"])
+    reads_per_sec = int(config['general']["reads_per_sec"])
     drivers = list(config["driver_mapping"].keys())
     # Open and bind socket
     try: 
