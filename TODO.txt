@@ -1,5 +1,5 @@
 -Handle ignition sequence after receiving ign command
--Emergency shutoff setup locally on the device
+-Emergency shutoff condition check addition
 -Add a safe mode setting. If connection lost for some period of time 
 default to approachable mode
 -General try-exception improvements 
