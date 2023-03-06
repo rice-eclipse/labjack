@@ -18,7 +18,7 @@ https://labjack.com/pages/support?doc=%2Fdatasheets%2Ft-series-datasheet%2F
 """
 
 from labjack import ljm
-import sys
+import datetime
 import time
 import csv
 import os
@@ -36,7 +36,7 @@ which should be located in the same sub-directory
 def read_config():
     global config
     config = configparser.ConfigParser()
-    config.read('configurations.ini')
+    config.read('config.ini')
     pass
 
 """
@@ -45,19 +45,23 @@ and again whenever connection is lost. In both cases, will block the thread
 that calls, on s.listen(), until dashboard sends connection request or 
 exception is thrown. 
 Sets global variable "conn", a socket object used throughout the program,
+
+    Parameters:
+        sock: socket object used throughout program
 """
-def connect_socket():
-    print("\n[INFO] Waiting for connection request...\n")
+def connect_socket(sock):
     sock.listen()
     global conn
     conn, _ = sock.accept()
+    conn.settimeout(.5)
     pass
 
 """
 File writer for collected data.
 
     Returns:
-        fw: writer object to csv file where data is saved
+        fw: csv file writer for data file
+        f: file writer 
 """
 def open_file():
     filename = config["general"]["filename"]
@@ -65,10 +69,10 @@ def open_file():
     f = open(filename + ".csv", "x")
     fw = csv.writer(f)
     # Write in the initial column labels
-    print("\n[INFO] Created new file %s",filename)
+    print("\n[INFO] Created new file: ",filename)
     fw.writerow(["Time (s)","LC1","LC2","LC3","LC4","SG1","SG2","PT1",\
     "PT2","PT3","PT4","TC1","TC2","TC3","TC4"]) #TODO format according to order in configurations.ini
-    return fw
+    return fw,f
 
 """
 Dashboard command listener, and handler.
@@ -93,31 +97,41 @@ tasks.
         Breaks from infinite loop and closes
 
 """
-def command_from_dash(close_lock,close):
+def command_from_dash(handle,close_lock):
+    global close
     while True:
         try:
+            if close_lock.acquire():
+                if close == 1:
+                    close_lock.release()
+                    return 
+                close_lock.release()
             # Receive up to 2048 bytes, in the utf-8 format
-            cmd = conn.recv(2048).decode('utf-8')
+            try:
+                cmd = conn.recv(2048).decode('utf-8')
+            except socket.timeout:
+                cmd = ""
+                pass
             # Unpack into JSON object
-            decodeCmd = json.loads(cmd)
-            if not decodeCmd: pass
+            if not cmd: continue
+            decode_cmd = json.loads(cmd)
             print("\n[INFO] Received command: " + str(cmd))
             # Check if command field is set_valve: set "driver" field to "value"
-            if decodeCmd["command"] == "set_valve":
+            if decode_cmd["command"] == "set_valve":
                 # Carry out command on hardware
-                ljm.eWriteName(handle,config["driver_mapping"][str(decodeCmd["driver"])],decodeCmd["value"])
-                print("\n[INFO] Set driver %d to value of %d"\
-                    ,config["driver_mapping"][str(decodeCmd["driver"])],decodeCmd["value"])
+                ljm.eWriteName(handle,config["driver_mapping"][str(decode_cmd["driver"])],decode_cmd["value"])
+                print("\n[INFO] Set driver ",config["driver_mapping"][str(decode_cmd["driver"])],"to",decode_cmd["value"])
             # Check if command is ignition
-            elif decodeCmd["command"] == "ignition":
+            elif decode_cmd["command"] == "ignition":
                 #TODO ignition sequence helper call
                 print("\n[INFO] Ignition command received...")
                 pass
             # Check if command is "close"
-            elif decodeCmd["command"] == "close":
+            elif decode_cmd["command"] == "close":
                 print("\n[INFO] Stopping command listening...")
-                with close_lock.acquire():
+                if close_lock.acquire():
                     close = 1
+                    close_lock.release()
                 break
         except socket.error:
             print("\n[WARN] Invalid dashboard connection")
@@ -130,6 +144,7 @@ def command_from_dash(close_lock,close):
             """
             time.sleep(.5)
             pass
+    return
 
 """
 Dashboard data sender 
@@ -147,8 +162,14 @@ Packets are sent as encoded JSON objects, with the following fields:
         function contain "data" here. Others, such as errors, will have 
         something else
 """
-def data_to_dash(handle,data_buf,locks):
+def data_to_dash(handle,sock,data_buf,locks):
+    global close
     while True: 
+        if locks['close_lock'].acquire():
+            if close == 1:
+                locks['close_lock'].release()
+                return 
+            locks['close_lock'].release()
         states = []
         JSONData = {}
         # Reading current driver pin states
@@ -156,10 +177,12 @@ def data_to_dash(handle,data_buf,locks):
         for char in statebin:
             states.append(int(char))
         # Access to dataBuf from main() thread
-        with locks[buf_lock].acquire(timeout = .01):
+        if locks['buf_lock'].acquire(timeout = .01):
             JSONData['sensors'] = convert_vals(np.asarray(data_buf[0]))
+            locks['buf_lock'].release()
         JSONData['states'] = states[::-1]
         JSONData['console'] = "data"
+        JSONData['timestamp'] = ""
         JSONObj = json.dumps(JSONData)  
         try: 
             sendStr = JSONObj.encode('UTF-8')
@@ -171,16 +194,22 @@ def data_to_dash(handle,data_buf,locks):
             If the connection is invalid, attempts to repair via connect_socket()
             which blocks until connection is fixed or exception is thrown
             """
-            connect_socket()
+            try:
+                connect_socket(sock)
+            except socket.timeout: 
+                pass
             pass
-        with locks[close_lock].acquire(timeout = .01):
+        if locks['close_lock'].acquire():
             if close == 1:
+                locks['close_lock'].release()
                 print("\n[INFO] Stopped command sending...")
                 break
+            locks['close_lock'].release()
         time.sleep(int(config["general"]["dash_send_delay_ms"]) / 1000)
+    return
 
 def msg_to_dash(sock_lock,msg):
-    with sock_lock:
+    if sock_lock.acquire:
         JSONData = {}
         JSONData['sensors'] = []
         JSONData['states'] = []
@@ -190,8 +219,10 @@ def msg_to_dash(sock_lock,msg):
             sendStr = JSONObj.encode('UTF-8')
             conn.send(len(sendStr).to_bytes(2,"big"))
             conn.sendall(sendStr)
+            sock_lock.release()
         except socket.error:
             print("\n[WARN] Failed to send console msg: %s !",msg)
+            sock_lock.release()
             pass
 
 """
@@ -210,29 +241,29 @@ regularly.
 def convert_vals(sensor_vals):
     if sensor_vals.size == 0: return []
     n_sensors = sensor_vals.copy()
-    for i, chan in enumerate(list(config['sensor_channel_mapping'].keys())):
-        # Iterating through the sensors and treating each column of data accordingly
-        if chan[:6] == "thermo":
-            if len(n_sensors.shape) == 2:
-                n_sensors[:,i] = np.round((sensor_vals[:,i] * config['conversion']['thermo_scale']\
-                     + config['conversion']['thermo_offset']))
-            elif len(n_sensors.shape) == 1:
-                n_sensors[i] = np.round((sensor_vals[i] * config['conversion']['thermo_scale']\
-                     + config['conversion']['thermo_offset']))
-        elif chan[:4] ==  "load":
-            if len(n_sensors.shape) == 2:
-                n_sensors[:,i] = np.round((sensor_vals[:,i] * config['conversion']['big_lc_scale']\
-                     + config['conversion']['big_lc_offset']))            
-            elif len(n_sensors.shape) == 1:
-                n_sensors[i] = np.round((sensor_vals[i] * config['conversion']['big_lc_scale']\
-                     + config['conversion']['big_lc_offset']))
-        elif chan[:4] ==  "pres":
-            if len(n_sensors.shape) == 2:
-                n_sensors[:,i] = np.round((sensor_vals[:,i] * config['conversion']['pres_scale']\
-                     + config['conversion']['pres_offset']))                
-            elif len(n_sensors.shape) == 1: 
-                n_sensors[i] = np.round((sensor_vals[i] * config['conversion']['pres_scale']\
-                     + config['conversion']['pres_offset']))
+    # for i, chan in enumerate(list(config['sensor_channel_mapping'].keys())):
+    #     # Iterating through the sensors and treating each column of data accordingly
+    #     if chan[:6] == "thermo":
+    #         if len(n_sensors.shape) == 2:
+    #             n_sensors[:,i] = np.round((sensor_vals[:,i] * config['conversion']['thermo_scale']\
+    #                  + config['conversion']['thermo_offset']))
+    #         elif len(n_sensors.shape) == 1:
+    #             n_sensors[i] = np.round((sensor_vals[i] * config['conversion']['thermo_scale']\
+    #                  + config['conversion']['thermo_offset']))
+    #     elif chan[:4] ==  "load":
+    #         if len(n_sensors.shape) == 2:
+    #             n_sensors[:,i] = np.round((sensor_vals[:,i] * config['conversion']['big_lc_scale']\
+    #                  + config['conversion']['big_lc_offset']))            
+    #         elif len(n_sensors.shape) == 1:
+    #             n_sensors[i] = np.round((sensor_vals[i] * config['conversion']['big_lc_scale']\
+    #                  + config['conversion']['big_lc_offset']))
+    #     elif chan[:4] ==  "pres":
+    #         if len(n_sensors.shape) == 2:
+    #             n_sensors[:,i] = np.round((sensor_vals[:,i] * config['conversion']['pres_scale']\
+    #                  + config['conversion']['pres_offset']))                
+    #         elif len(n_sensors.shape) == 1: 
+    #             n_sensors[i] = np.round((sensor_vals[i] * config['conversion']['pres_scale']\
+    #                  + config['conversion']['pres_offset']))
     return n_sensors.tolist()
 
 """
@@ -247,10 +278,10 @@ and write data into the file
         constants: dictionary with program constants
 """
 def data_log(fw,sensors,sweepnum,constants):
-    timestamps = np.linspace((sweepnum - 1)/constants[READS_PER_SEC],(sweepnum-(1/constants[SAMPLE_RATE]))\
-        /constants[READS_PER_SEC],constants[SAMPLE_RATE] // constants[READS_PER_SEC])
-    sensorsR = np.asarray(sensors).reshape(constants[SAMPLE_RATE] // constants[READS_PER_SEC],constants[NUM_CHANNELS])
-    write_data = np.column_stack((np.transpose(timestamps),vconv(sensorsR)))
+    timestamps = np.linspace((sweepnum - 1)/constants['READS_PER_SEC'],(sweepnum-(1/constants['SAMPLE_RATE']))\
+        /constants['READS_PER_SEC'],constants['SAMPLE_RATE'] // constants['READS_PER_SEC'])
+    sensorsR = np.asarray(sensors).reshape(constants['SAMPLE_RATE'] // constants['READS_PER_SEC'],constants['NUM_CHANNELS'])
+    write_data = np.column_stack((np.transpose(timestamps),convert_vals(sensorsR)))
     fw.writerows(write_data)
 
 """
@@ -264,7 +295,7 @@ negative channel setting and analog signal amplification.
         handle: object for connection to LabJack device hardware
 """
 def stream_setup(handle):
-    reg_names = ["STREAM_TRIGGER_INDEX","STEAM_CLOCK_SOURCE","STREAM_RESOLUTION_INDEX","STREAM_SETTLING_US"]
+    reg_names = ["STREAM_TRIGGER_INDEX","STREAM_CLOCK_SOURCE","STREAM_RESOLUTION_INDEX","STREAM_SETTLING_US"]
     reg_values = [0,0,0,0]
     for chan in config["sensor_negative_channels"].keys():
         reg_names.append(config["sensor_channel_mapping"][chan] + "_NEGATIVE_CH")
@@ -293,80 +324,78 @@ array for other threads to access, and logs all collected values to file.
         constants: dictionary with program constants
         locks: dictionary with shared data structure access locks
 '''
-def collect_data(handle,fw,close,data_buf,constants,locks):
+def collect_data(handle,fw,sock,data_buf,constants,locks):
     i = 0
+    global close
     print("\n[INFO] Starting data collection...")
-    # Spawn two additional threads for dashboard sending and receiving
-    try:
-        data_sender = Thread(target = data_to_dash, args = (handle,data_buf,locks,close ))
-        data_sender.start()
-        dash_listener = Thread(target = command_from_dash, args = (locks[close_lock],close))
-        dash_listener.start()
-    except Exception as e:
-        print("\n[ERR] Got exception while attempting to start dash sender and/or dash listener:"\
-             + str(e))
-        msg_to_dash(locks[sock_lock],"\nERROR: Got exception while attempting to start dash sender and/or dash listener:"\
-             + str(e))
-        return
     while True:
         try:
+            # end = datetime.now
+            # print("Took ",end-start,"time to loop around")
             ret = ljm.eStreamRead(handle)
+            # start = datetime.now
         except Exception as e:
-            print("\n[ERR] Got exception while attmpting to read from LabJack stream: " + str(e))
-            msg_to_dash(locks[sock_lock],"\nERROR: Got exception while attmpting to read from LabJack stream: "\
+            print("\n[ERR] Got exception while attmpting to read from LabJack stream:\n" + str(e))
+            msg_to_dash(locks['sock_lock'],"ERROR: Got exception while attmpting to read from LabJack stream: "\
                  + str(e))
+            raise Exception
         try:
             all_data = ret[0]
             # Count the skipped samples which are indicated by -9999 values. Missed
             # samples occur after a device's stream buffer overflows and are
             # reported after auto-recover mode ends. 
             if all_data.count(-9999.0) > 0:
-                msg_to_dash(locks[sock_lock],"\nWARNING: %d Samples got skipped! Program too slow or sample\
+                msg_to_dash(locks['sock_lock'],"WARNING: %d Samples got skipped! Program too slow or sample\
                     rate too high",all_data.count(-9999.0))
             # Every 1000 samples (roughly 3.3 sec) indicate correct running
-            if (i % 1000 == 0): print("\n[INFO] Successfully collected %i samples" % i)
             # Try to write to the buffer or continuing without
-            with locks[buf_lock].acquire(timeout = .005):
+            if locks['buf_lock'].acquire(timeout = .005):
                 data_buf[0] = []
-                for j in range(0, constants[NUM_CHANNELS]):
+                for j in range(0, constants['NUM_CHANNELS']):
                     data_buf[0].append(float(all_data[j])) 
+                locks['buf_lock'].release()
             i += 1
+            if (i % 1000 == 0): print("\n[INFO] Successfully collected %i samples" % i)
             # Write values from this sweep to SD card
             data_log(fw,all_data,i,constants)
             # Check close condition
-            if locks[close_lock].acquire(timeout = .01):
+            if locks['close_lock'].acquire():
                 if close == 1: 
+                    locks['close_lock'].release()
                     print("\n[INFO] Close command received. Shutting down...")
-                    data_sender.join(timeout = 5)
-                    dash_listener.join(timeout = 5)
-                    break
-        except:
+                    return
+                locks['close_lock'].release()
+            else: print("[WARN] Collector unable to access close")
+        except Exception as e:
             """
             In the event of an error here, let helper functions handle
             the exception independently. Return to ensure proper closing of program
             handles and writers
             """
-
-            return
+            print("\n[ERR] Issue in data collection: ",e,". Shutting down...")
+            raise Exception
     
 def main():
     read_config()
     # Creating and binding socket to HOST:PORT, creating lock for send access
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(config["general"]["HOST"],int(config["general"]["PORT"]))
-    print("\n[INFO] Bound socket to: " + str(config["general"]["HOST"])\
+    sock.bind((config["general"]["HOST"],int(config["general"]["PORT"])))
+    print("\n[INFO] Bound socket to " + str(config["general"]["HOST"])\
          + ":" + str(config["general"]["PORT"]))
     sock_lock = Lock()
+    print("\n[INFO] Waiting for connection request...")
+    connect_socket(sock)
+    sock.settimeout(.5)
     # Defining relevant constants
     SAMPLE_RATE = 300 # See external documentation for more info on this value
     NUM_CHANNELS = len(config["sensor_channel_mapping"].keys())
     NUM_DRIVERS = len(config["driver_mapping"].keys())
-    READS_PER_SEC = int(config['general']["reads_per_sec"])
+    READS_PER_SEC = 300
     constants = {
-        SAMPLE_RATE:SAMPLE_RATE,
-        NUM_CHANNELS:NUM_CHANNELS,
-        NUM_DRIVERS:NUM_DRIVERS,
-        READS_PER_SEC:READS_PER_SEC
+        'SAMPLE_RATE':SAMPLE_RATE,
+        'NUM_CHANNELS':NUM_CHANNELS,
+        'NUM_DRIVERS':NUM_DRIVERS,
+        'READS_PER_SEC':READS_PER_SEC
     }
     try: 
         handle = ljm.openS("T7", "USB", "ANY")
@@ -382,29 +411,52 @@ def main():
     buf_lock = Lock()
     close_lock = Lock()
     locks = {
-        buf_lock:buf_lock,
-        close_lock:close_lock,
-        sock_lock:sock_lock
+        'buf_lock':buf_lock,
+        'close_lock':close_lock,
+        'sock_lock':sock_lock
     }
     # Buffer for data slices for dashboard send
     data_buf = [[]]
     # Value used to communicate stop-command status between threads
+    global close
     close = 0
     stream_setup(handle)
-    if (ljm.eStreamStart(handle, scansPerRead, NUM_CHANNELS, aScanList, SAMPLE_RATE) != SAMPLE_RATE):
+    if (int(ljm.eStreamStart(handle, scansPerRead, NUM_CHANNELS, aScanList, SAMPLE_RATE)) != SAMPLE_RATE):
         msg_to_dash(sock_lock,"\nERROR: Configured sample rate does not match actual sample rate")
         ljm.close(handle)
         sock.close()
         return
-    fw = open_file()
-    collect_data(handle,fw,close,data_buf,constants,locks)
+    fw,f = open_file()
+        # Spawn two additional threads for dashboard sending and receiving
+    try:
+        data_sender = Thread(target = data_to_dash, args = (handle,sock,data_buf,locks, ))
+        data_sender.start()
+        dash_listener = Thread(target = command_from_dash, args = (handle,locks['close_lock'],))
+        dash_listener.start()
+    except Exception as e:
+        print("\n[ERR] Got exception in dash sender and/or dash listener:\n"\
+             + str(e))
+        msg_to_dash(locks['sock_lock'],"ERROR: Got exception in dash sender and/or dash listener:"\
+             + str(e))
+        ljm.close(handle)
+        sock.close()
+        return
+    try:
+        collect_data(handle,fw,sock,data_buf,constants,locks)
+    except:
+        if close_lock.acquire():
+            close = 1
+            close_lock.release()
+    print("\n[INFO] Waiting on other threads to close for shutdown...")
+    data_sender.join()
+    dash_listener.join()
     ljm.close(handle)
     sock.close()
-    fw.close()
+    f.close()
     pass
 
 if __name__ == '__main__':
-    print("===============================================================\
+    print("\n===============================================================\
     \nData Acquisition and Remote Control for Eclipse Hybrid Engines\
     \n===============================================================")
     main()
