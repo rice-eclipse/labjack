@@ -72,8 +72,10 @@ def open_file(filename):
     fw = csv.writer(f)
     # Write in the initial column labels
     print("\n[INFO] Created new file in ../data/: ",filename)
-    fw.writerow(["Time (s)","LC1","LC2","LC3","LC4","SG1","SG2","TC1",\
-    "TC2","TC3","TC4","PT1","PT2","PT3","PT4"]) #TODO format according to order in configurations.ini
+    cols = ["Time (s)"]
+    for sensors in config["sensor_channel_mapping"]:
+        cols.append(sensors)
+    fw.writerow(cols) 
     return fw,f
 
 """
@@ -252,36 +254,43 @@ regularly.
 def convert_vals(sensor_vals):
     if sensor_vals.size == 0: return []
     n_sensors = sensor_vals.copy()
-    # for i, chan in enumerate(list(config['sensor_channel_mapping'].keys())):
-    #     # Iterating through the sensors and treating each column of data accordingly
-    #     if chan[:6] == "thermo":
-    #         if len(n_sensors.shape) == 2:
-    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['thermo_offset']))\
-    #                  / float(config['conversion']['thermo_scale']),2)
-    #         elif len(n_sensors.shape) == 1:
-    #             n_sensors[i] = np.round((sensor_vals[i] -float(config['conversion']['thermo_offset']))\
-    #                  / float(config['conversion']['thermo_scale']),2)
-    #     elif chan[:4] ==  "load":
-    #         if len(n_sensors.shape) == 2:
-    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['big_lc_offset']))\
-    #                  / float(config['conversion']['big_lc_scale']),2)            
-    #         elif len(n_sensors.shape) == 1:
-    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['big_lc_offset']))\
-    #                  / float(config['conversion']['big_lc_scale']),2)
-    #     elif chan[:4] ==  "strain":
-    #         if len(n_sensors.shape) == 2:
-    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['strain_offset']))\
-    #                  / float(config['conversion']['strain_scale']),2)            
-    #         elif len(n_sensors.shape) == 1:
-    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['strain_offset']))\
-    #                  / float(config['conversion']['strain_scale']),2)                     
-    #     elif chan[:4] ==  "pres":
-    #         if len(n_sensors.shape) == 2:
-    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['pres_offset']))\
-    #                  / float(config['conversion']['pres_scale']),2)                
-    #         elif len(n_sensors.shape) == 1: 
-    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['pres_offset']))\
-    #                  / float(config['conversion']['pres_scale']),2)
+    for i, chan in enumerate(list(config['sensor_channel_mapping'].keys())):
+        # Iterating through the sensors and treating each column of data accordingly
+        if chan[:6] == "thermo":
+            if len(n_sensors.shape) == 2:
+                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['thermo_offset']))\
+                     / float(config['conversion']['thermo_scale']),2)
+            elif len(n_sensors.shape) == 1:
+                n_sensors[i] = np.round((sensor_vals[i] -float(config['conversion']['thermo_offset']))\
+                     / float(config['conversion']['thermo_scale']),2)
+        elif chan[:6] ==  "b_load":
+            if len(n_sensors.shape) == 2:
+                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['big_lc_offset']))\
+                     / float(config['conversion']['big_lc_scale']),2)            
+            elif len(n_sensors.shape) == 1:
+                n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['big_lc_offset']))\
+                     / float(config['conversion']['big_lc_scale']),2)
+        elif chan[:6] ==  "s_load":
+            if len(n_sensors.shape) == 2:
+                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['small_lc_offset']))\
+                     / float(config['conversion']['small_lc_scale']),2)            
+            elif len(n_sensors.shape) == 1:
+                n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['big_lc_offset']))\
+                     / float(config['conversion']['small_lc_scale']),2)
+        elif chan[:4] ==  "strain":
+            if len(n_sensors.shape) == 2:
+                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['strain_offset']))\
+                     / float(config['conversion']['strain_scale']),2)            
+            elif len(n_sensors.shape) == 1:
+                n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['strain_offset']))\
+                     / float(config['conversion']['strain_scale']),2)                     
+        elif chan[:4] ==  "pres":
+            if len(n_sensors.shape) == 2:
+                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['pres_offset']))\
+                     / float(config['conversion']['pres_scale']),2)                
+            elif len(n_sensors.shape) == 1: 
+                n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['pres_offset']))\
+                     / float(config['conversion']['pres_scale']),2)
     return n_sensors.tolist()
 
 """
@@ -333,6 +342,21 @@ def stream_setup(handle):
     pass
 
 '''
+Emergency shutdown handling
+Called every time data is sampled (~3ms) and checks for unsafe system state
+'''
+def e_shutdown(handle,data):
+    # Get the appropriate value to check
+    e_shutdown_index = 0
+    for sensors in config["sensor_channel_mapping"]:
+        if sensors == config["proxima_emergency_shutoff"]:
+            break
+    if (data[e_shutdown_index] > float(config["proxima_emergency_shutoff"]["max_pressure"])):
+        # Close the valve
+        ljm.eWriteName(handle,config["proxima_emergency_shutoff"]["shutdown_valve"],0)
+    pass
+
+'''
 Indefinitely collects and handles data from sensors
 Notifies user if values are being skipped, places subset of values in
 array for other threads to access, and logs all collected values to file.
@@ -357,11 +381,15 @@ def collect_data(handle,fw,sock,data_buf,constants,locks):
             all_data = list(ret[0])
             ljm_buff = ret[2]
             # Removing LJM buffer buildup to ensure it never overflows and crashes the stream
+            e_shutdown(handle,all_data[0:constants["NUM_CHANNELS"]])
+            if (i % 1000 == 0): print("\n[INFO] Successfully collected %i samples" % i)
             while (ljm_buff != 0):
                 more_data = ljm.eStreamRead(handle)
                 all_data += more_data[0]
                 ljm_buff = more_data[2]
+                e_shutdown(handle,list(more_data[0])[0:constants["NUM_CHANNELS"]])
                 i += 1
+                if (i % 1000 == 0): print("\n[INFO] Successfully collected %i samples" % i)
             # start = datetime.now
         except Exception as e:
             print("\n[ERR] Got exception while attmpting to read from LabJack stream:\n" + str(e))
@@ -383,8 +411,9 @@ def collect_data(handle,fw,sock,data_buf,constants,locks):
                 for j in range(0, constants['NUM_CHANNELS']):
                     data_buf[0].append(float(all_data[j])) 
                 locks['buf_lock'].release()
+            else:
+                print("[ERR] Issue writing to data buffer, losing data!")
             i += 1
-            if (i % 1000 == 0): print("\n[INFO] Successfully collected %i samples" % i)
             # Write values from this sweep to SD card
             data_log(fw,all_data,i,constants)
             # Check close condition
@@ -429,6 +458,8 @@ def main():
     }
     try: 
         handle = ljm.openS("T7", "USB", "ANY")
+        for driver in config["driver_mapping"]:
+            ljm.eWriteName(handle,config["driver_mapping"][driver],0)
     except:
         print("\n[ERR] Can't connect to LabJack device, shutting down...") 
         msg_to_dash(sock_lock,"\n[ERR] Can't connect to LabJack device, shutting down...")
@@ -480,6 +511,8 @@ def main():
     print("\n[INFO] Waiting on other threads to close for shutdown...")
     data_sender.join()
     dash_listener.join()
+    for driver in config["driver_mapping"]:
+        ljm.eWriteName(handle,config["driver_mapping"][driver],0)
     ljm.close(handle)
     conn.close()
     f.close()
