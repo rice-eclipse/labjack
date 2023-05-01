@@ -254,43 +254,43 @@ regularly.
 def convert_vals(sensor_vals):
     if sensor_vals.size == 0: return []
     n_sensors = sensor_vals.copy()
-    for i, chan in enumerate(list(config['sensor_channel_mapping'].keys())):
-        # Iterating through the sensors and treating each column of data accordingly
-        if chan[:6] == "thermo":
-            if len(n_sensors.shape) == 2:
-                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['thermo_offset']))\
-                     / float(config['conversion']['thermo_scale']),2)
-            elif len(n_sensors.shape) == 1:
-                n_sensors[i] = np.round((sensor_vals[i] -float(config['conversion']['thermo_offset']))\
-                     / float(config['conversion']['thermo_scale']),2)
-        elif chan[:6] ==  "b_load":
-            if len(n_sensors.shape) == 2:
-                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['big_lc_offset']))\
-                     / float(config['conversion']['big_lc_scale']),2)            
-            elif len(n_sensors.shape) == 1:
-                n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['big_lc_offset']))\
-                     / float(config['conversion']['big_lc_scale']),2)
-        elif chan[:6] ==  "s_load":
-            if len(n_sensors.shape) == 2:
-                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['small_lc_offset']))\
-                     / float(config['conversion']['small_lc_scale']),2)            
-            elif len(n_sensors.shape) == 1:
-                n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['big_lc_offset']))\
-                     / float(config['conversion']['small_lc_scale']),2)
-        elif chan[:4] ==  "strain":
-            if len(n_sensors.shape) == 2:
-                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['strain_offset']))\
-                     / float(config['conversion']['strain_scale']),2)            
-            elif len(n_sensors.shape) == 1:
-                n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['strain_offset']))\
-                     / float(config['conversion']['strain_scale']),2)                     
-        elif chan[:4] ==  "pres":
-            if len(n_sensors.shape) == 2:
-                n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['pres_offset']))\
-                     / float(config['conversion']['pres_scale']),2)                
-            elif len(n_sensors.shape) == 1: 
-                n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['pres_offset']))\
-                     / float(config['conversion']['pres_scale']),2)
+    # for i, chan in enumerate(list(config['sensor_channel_mapping'].keys())):
+    #     # Iterating through the sensors and treating each column of data accordingly
+    #     if chan[:6] == "thermo":
+    #         if len(n_sensors.shape) == 2:
+    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['thermo_offset']))\
+    #                  / float(config['conversion']['thermo_scale']),2)
+    #         elif len(n_sensors.shape) == 1:
+    #             n_sensors[i] = np.round((sensor_vals[i] -float(config['conversion']['thermo_offset']))\
+    #                  / float(config['conversion']['thermo_scale']),2)
+    #     elif chan[:6] ==  "b_load":
+    #         if len(n_sensors.shape) == 2:
+    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['big_lc_offset']))\
+    #                  / float(config['conversion']['big_lc_scale']),2)            
+    #         elif len(n_sensors.shape) == 1:
+    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['big_lc_offset']))\
+    #                  / float(config['conversion']['big_lc_scale']),2)
+    #     elif chan[:6] ==  "s_load":
+    #         if len(n_sensors.shape) == 2:
+    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['small_lc_offset']))\
+    #                  / float(config['conversion']['small_lc_scale']),2)            
+    #         elif len(n_sensors.shape) == 1:
+    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['small_lc_offset']))\
+    #                  / float(config['conversion']['small_lc_scale']),2)
+    #     elif chan[:4] ==  "strain":
+    #         if len(n_sensors.shape) == 2:
+    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['strain_offset']))\
+    #                  / float(config['conversion']['strain_scale']),2)            
+    #         elif len(n_sensors.shape) == 1:
+    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['strain_offset']))\
+    #                  / float(config['conversion']['strain_scale']),2)                     
+    #     elif chan[:4] ==  "pres":
+    #         if len(n_sensors.shape) == 2:
+    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['pres_offset']))\
+    #                  / float(config['conversion']['pres_scale']),2)                
+    #         elif len(n_sensors.shape) == 1: 
+    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['pres_offset']))\
+    #                  / float(config['conversion']['pres_scale']),2)
     return n_sensors.tolist()
 
 """
