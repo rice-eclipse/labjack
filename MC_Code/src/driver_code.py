@@ -10,6 +10,9 @@ engine conditions. Intended for use on Raspberry Pi, connected to a LabJack T7 v
 
 Ensure that config.ini is located in this sub-directory.
 
+For documentation on the overall setup:
+https://docs.google.com/document/d/1y7f7A9FtFfV9nHa74x1uJAnZVh4cjQFKVG3zE4jUQEY/edit?usp=sharing
+
 For more info about this software:
 https://github.com/rice-eclipse/labjack
 
@@ -23,7 +26,6 @@ from labjack import ljm
 from datetime import datetime
 import time
 import csv
-import os
 import socket
 import numpy as np
 import configparser
@@ -55,7 +57,8 @@ def connect_socket(sock):
     sock.listen()
     global conn
     temp, _ = sock.accept()
-    filename = str(datetime.fromtimestamp(int(temp.recv(1024).decode('utf-8')) - 2082844800 + 21600))
+    # First message is time since LabVIEW's epoch (not the same as linux). Converting into datetime string
+    filename = str(datetime.fromtimestamp(int(temp.recv(64).decode('utf-8')) - 2082844800 + 21600))
     temp.settimeout(.5)
     conn = temp
     return filename
@@ -105,11 +108,9 @@ def command_from_dash(handle,close_lock):
     global close
     while True:
         try:
-            if close_lock.acquire():
+            with close_lock:
                 if close == 1:
-                    close_lock.release()
                     return 
-                close_lock.release()
             # Receive up to 2048 bytes, in the utf-8 format
             try:
                 cmd = conn.recv(2048).decode('utf-8')
@@ -139,9 +140,8 @@ def command_from_dash(handle,close_lock):
             # Check if command is "close"
             elif decode_cmd["command"] == "close":
                 print("\n[INFO] Stopping command listening...")
-                if close_lock.acquire():
+                with close_lock:
                     close = 1
-                    close_lock.release()
                 break
         except socket.error:
             print("\n[WARN] Invalid dashboard connection")
@@ -175,18 +175,16 @@ Packets are sent as encoded JSON objects, with the following fields:
 def data_to_dash(handle,sock,data_buf,locks):
     global close
     while True: 
-        if locks['close_lock'].acquire():
+        with locks['close_lock']:
             if close == 1:
-                locks['close_lock'].release()
                 return 
-            locks['close_lock'].release()
         states = []
         JSONData = {}
         # Reading current driver pin states
         statebin = format(int(ljm.eReadName(handle,"EIO_STATE")),'05b')
         for char in statebin:
             states.append(int(char))
-        # Reading current ign pin states
+        # Reading ign pin status
         statebin = format(int(ljm.eReadName(handle,"CIO_STATE")),'04b')
         states = [(int(statebin[1]))] + states
         # Access to dataBuf from main() thread
@@ -199,30 +197,31 @@ def data_to_dash(handle,sock,data_buf,locks):
         JSONObj = json.dumps(JSONData)  
         try: 
             sendStr = JSONObj.encode('UTF-8')
+            # Sends int length before message for dash to recv() w/ correct size
             conn.send(len(sendStr).to_bytes(2,"big"))
             conn.sendall(sendStr)
         except socket.error:
             print("\n[WARN] Connection issue! Waiting for reconnect before resend")
             """
             If the connection is invalid, attempts to repair via connect_socket()
-            which blocks until connection is fixed or exception is thrown
             """
             try:
                 _ = connect_socket(sock)
             except socket.timeout: 
                 pass
             pass
-        if locks['close_lock'].acquire():
+        with locks['close_lock']:
             if close == 1:
-                locks['close_lock'].release()
                 print("\n[INFO] Stopped command sending...")
                 break
-            locks['close_lock'].release()
         time.sleep(int(config["general"]["dash_send_delay_ms"]) / 1000)
     return
 
+"""
+Helper method for debugging
+"""
 def msg_to_dash(sock_lock,msg):
-    if sock_lock.acquire:
+    with sock_lock:
         JSONData = {}
         JSONData['sensors'] = []
         JSONData['states'] = []
@@ -232,10 +231,8 @@ def msg_to_dash(sock_lock,msg):
             sendStr = JSONObj.encode('UTF-8')
             conn.send(len(sendStr).to_bytes(2,"big"))
             conn.sendall(sendStr)
-            sock_lock.release()
         except socket.error:
             print("\n[WARN] Failed to send console msg: %s !",msg)
-            sock_lock.release()
             pass
 
 """
@@ -254,43 +251,34 @@ regularly.
 def convert_vals(sensor_vals):
     if sensor_vals.size == 0: return []
     n_sensors = sensor_vals.copy()
-    # for i, chan in enumerate(list(config['sensor_channel_mapping'].keys())):
-    #     # Iterating through the sensors and treating each column of data accordingly
-    #     if chan[:6] == "thermo":
-    #         if len(n_sensors.shape) == 2:
-    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['thermo_offset']))\
-    #                  / float(config['conversion']['thermo_scale']),2)
-    #         elif len(n_sensors.shape) == 1:
-    #             n_sensors[i] = np.round((sensor_vals[i] -float(config['conversion']['thermo_offset']))\
-    #                  / float(config['conversion']['thermo_scale']),2)
-    #     elif chan[:6] ==  "b_load":
-    #         if len(n_sensors.shape) == 2:
-    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['big_lc_offset']))\
-    #                  / float(config['conversion']['big_lc_scale']),2)            
-    #         elif len(n_sensors.shape) == 1:
-    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['big_lc_offset']))\
-    #                  / float(config['conversion']['big_lc_scale']),2)
-    #     elif chan[:6] ==  "s_load":
-    #         if len(n_sensors.shape) == 2:
-    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['small_lc_offset']))\
-    #                  / float(config['conversion']['small_lc_scale']),2)            
-    #         elif len(n_sensors.shape) == 1:
-    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['small_lc_offset']))\
-    #                  / float(config['conversion']['small_lc_scale']),2)
-    #     elif chan[:4] ==  "strain":
-    #         if len(n_sensors.shape) == 2:
-    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['strain_offset']))\
-    #                  / float(config['conversion']['strain_scale']),2)            
-    #         elif len(n_sensors.shape) == 1:
-    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['strain_offset']))\
-    #                  / float(config['conversion']['strain_scale']),2)                     
-    #     elif chan[:4] ==  "pres":
-    #         if len(n_sensors.shape) == 2:
-    #             n_sensors[:,i] = np.round((sensor_vals[:,i] - float(config['conversion']['pres_offset']))\
-    #                  / float(config['conversion']['pres_scale']),2)                
-    #         elif len(n_sensors.shape) == 1: 
-    #             n_sensors[i] = np.round((sensor_vals[i] - float(config['conversion']['pres_offset']))\
-    #                  / float(config['conversion']['pres_scale']),2)
+    sensor_keys = list(config['sensor_channel_mapping'].keys())
+    for i, chan in enumerate(sensor_keys):
+        key_prefix = chan[:6]
+        is_two_dim = len(n_sensors.shape) == 2
+        sensor_index = (slice(None), i) if is_two_dim else i
+        offset_key = None
+        scale_key = None
+
+        if key_prefix == "thermo":
+            offset_key = 'thermo_offset'
+            scale_key = 'thermo_scale'
+        elif key_prefix == "b_load":
+            offset_key = 'big_lc_offset'
+            scale_key = 'big_lc_scale'
+        elif key_prefix == "s_load":
+            offset_key = 'small_lc_offset'
+            scale_key = 'small_lc_scale'
+        elif key_prefix == "strain":
+            offset_key = 'strain_offset'
+            scale_key = 'strain_scale'
+        elif key_prefix[:4] == "pres":
+            pt_num = chan[:6]
+            offset_key = pt_num + '_offset'
+            scale_key = pt_num + '_scale'
+
+        if offset_key and scale_key:
+            n_sensors[sensor_index] = np.round(
+                (sensor_vals[sensor_index] - float(config['conversion'][offset_key])) / float(config['conversion'][scale_key]), 2)
     return n_sensors.tolist()
 
 """
@@ -306,8 +294,6 @@ and write data into the file
 """
 def data_log(fw,sensors,sweepnum,constants):
     num_reads = int(len(sensors) / constants['NUM_CHANNELS'])
-    start = (sweepnum - num_reads - 1)/constants['READS_PER_SEC']
-    end = (sweepnum - 1)/constants['READS_PER_SEC']
     timestamps = np.round(np.linspace((sweepnum - num_reads)/constants['READS_PER_SEC'],\
         (sweepnum - 1)/constants['READS_PER_SEC'],num_reads),3)
     sensorsR = np.asarray(sensors).reshape(num_reads,constants['NUM_CHANNELS'])
@@ -342,21 +328,6 @@ def stream_setup(handle):
     pass
 
 '''
-Emergency shutdown handling
-Called every time data is sampled (~3ms) and checks for unsafe system state
-'''
-def e_shutdown(handle,data):
-    # Get the appropriate value to check
-    e_shutdown_index = 0
-    for sensors in config["sensor_channel_mapping"]:
-        if sensors == config["proxima_emergency_shutoff"]:
-            break
-    if (data[e_shutdown_index] > float(config["proxima_emergency_shutoff"]["max_pressure"])):
-        # Close the valve
-        ljm.eWriteName(handle,config["proxima_emergency_shutoff"]["shutdown_valve"],0)
-    pass
-
-'''
 Indefinitely collects and handles data from sensors
 Notifies user if values are being skipped, places subset of values in
 array for other threads to access, and logs all collected values to file.
@@ -369,61 +340,66 @@ array for other threads to access, and logs all collected values to file.
         constants: dictionary with program constants
         locks: dictionary with shared data structure access locks
 '''
-def collect_data(handle,fw,sock,data_buf,constants,locks):
-    i = 0
-    global close
+def collect_data(handle,fw,data_buf,constants,locks):
     print("\n[INFO] Starting data collection...")
+    i = 0
+    e_count = 0
+    idx = 0
+    global close
+    # Finding what index e-shutdown is at
+    for sensor in config["sensor_channel_mapping"]:
+        if sensor == config['proxima_emergency_shutdown']:
+            break
+        idx += 1
     while True:
         try:
-            # end = datetime.now
-            # print("Took ",end-start,"time to loop around")
             ret = ljm.eStreamRead(handle)
             all_data = list(ret[0])
             ljm_buff = ret[2]
+            # Check if value exceed emergency treshhold
+            if all_data[0:constants["NUM_CHANNELS"]][idx] > config["proxima_emergency_shutdown"]:
+                e_count += 1
+                # If 3 consecutive threshold exceeds, shutdown the valve
+                if (e_count > 2):
+                    ljm.eWriteName(handle,config["proxima_emergency_shutoff"]["shutdown_valve"],0)
+            else:
+                e_count = 0
             # Removing LJM buffer buildup to ensure it never overflows and crashes the stream
-            e_shutdown(handle,all_data[0:constants["NUM_CHANNELS"]])
             if (i % 1000 == 0): print("\n[INFO] Successfully collected %i samples" % i)
             while (ljm_buff != 0):
                 more_data = ljm.eStreamRead(handle)
                 all_data += more_data[0]
                 ljm_buff = more_data[2]
-                e_shutdown(handle,list(more_data[0])[0:constants["NUM_CHANNELS"]])
+                if list(more_data[0])[0:constants["NUM_CHANNELS"]][idx] > config["proxima_emergency_shutdown"]:
+                    e_count += 1
+                    if (e_count > 2):
+                        ljm.eWriteName(handle,config["proxima_emergency_shutoff"]["shutdown_valve"],0)
+                else:
+                    e_count = 0                
                 i += 1
                 if (i % 1000 == 0): print("\n[INFO] Successfully collected %i samples" % i)
-            # start = datetime.now
         except Exception as e:
             print("\n[ERR] Got exception while attmpting to read from LabJack stream:\n" + str(e))
             msg_to_dash(locks['sock_lock'],"ERROR: Got exception while attmpting to read from LabJack stream: "\
                  + str(e))
             raise Exception
         try:
-            # Count the skipped samples which are indicated by -9999 values. Missed
-            # samples occur after a device's stream buffer overflows and are
-            # reported after auto-recover mode ends. 
-            if all_data.count(-9999.0) > 0:
-                msg_to_dash(locks['sock_lock'],"WARNING: %d Samples got skipped! Program too slow or sample\
-                    rate too high",all_data.count(-9999.0))
-                printf("Skipping samples!")
-            # Every 1000 samples (roughly 3.3 sec) indicate correct running
-            # Try to write to the buffer or continuing without
-            if locks['buf_lock'].acquire(timeout = .005):
+            # Try to write to the buffer or continue without
+            if locks['buf_lock'].acquire(timeout = .5):
                 data_buf[0] = []
                 for j in range(0, constants['NUM_CHANNELS']):
                     data_buf[0].append(float(all_data[j])) 
                 locks['buf_lock'].release()
             else:
-                print("[ERR] Issue writing to data buffer, losing data!")
+                print("[ERR] Issue writing to data buffer")
             i += 1
             # Write values from this sweep to SD card
             data_log(fw,all_data,i,constants)
             # Check close condition
-            if locks['close_lock'].acquire():
+            with locks['close_lock']:
                 if close == 1: 
-                    locks['close_lock'].release()
                     print("\n[INFO] Close command received. Shutting down...")
                     return
-                locks['close_lock'].release()
-            else: print("[WARN] Collector unable to access close")
         except Exception as e:
             """
             In the event of an error here, let helper functions handle
@@ -435,55 +411,49 @@ def collect_data(handle,fw,sock,data_buf,constants,locks):
     
 def main():
     read_config()
-    # Creating and binding socket to HOST:PORT, creating lock for send access
+    # Creating and binding socket to HOST:PORT
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((config["general"]["HOST"],int(config["general"]["PORT"])))
     print("\n[INFO] Bound socket to " + str(config["general"]["HOST"])\
          + ":" + str(config["general"]["PORT"]))
-    sock_lock = Lock()
     print("\n[INFO] Waiting for connection request...")
     filename = connect_socket(sock)
     sock.settimeout(.5)
-    # Defining relevant constants
-    SAMPLE_RATE = 300 # See external documentation for more info on this value
-    NUM_CHANNELS = len(config["sensor_channel_mapping"].keys())
-    NUM_DRIVERS = len(config["driver_mapping"].keys())
-    READS_PER_SEC = 300
     constants = {
-        'SAMPLE_RATE':SAMPLE_RATE,
-        'NUM_CHANNELS':NUM_CHANNELS,
-        'NUM_DRIVERS':NUM_DRIVERS,
-        'READS_PER_SEC':READS_PER_SEC
+        'SAMPLE_RATE':300,
+        'NUM_CHANNELS':len(config["sensor_channel_mapping"].keys()),
+        'NUM_DRIVERS':len(config["driver_mapping"].keys()),
+        'READS_PER_SEC':300
+    }
+    # Locks for data race prevention
+    locks = {
+        'buf_lock':Lock(), # For the buffer containing sensors snapshot, to be sent to dash
+        'close_lock':Lock(), # For universal close indicator
+        'sock_lock':Lock() # For send() access on the socket
     }
     try: 
         handle = ljm.openS("T7", "USB", "ANY")
+        # Default all drivers (they should already be)
         for driver in config["driver_mapping"]:
             ljm.eWriteName(handle,config["driver_mapping"][driver],0)
     except:
         print("\n[ERR] Can't connect to LabJack device, shutting down...") 
-        msg_to_dash(sock_lock,"\n[ERR] Can't connect to LabJack device, shutting down...")
+        msg_to_dash(locks["sock_lock"],"\n[ERR] Can't connect to LabJack device, shutting down...")
         conn.close()
         return
     aScanListNames = list(config["sensor_channel_mapping"].values())
-    aScanList = ljm.namesToAddresses(NUM_CHANNELS, aScanListNames)[0]
-    scansPerRead = SAMPLE_RATE // READS_PER_SEC
-    # Locks for data race prevention
-    buf_lock = Lock()
-    close_lock = Lock()
-    locks = {
-        'buf_lock':buf_lock,
-        'close_lock':close_lock,
-        'sock_lock':sock_lock
-    }
+    aScanList = ljm.namesToAddresses(constants["NUM_CHANNELS"], aScanListNames)[0]
+    scansPerRead = constants["SAMPLE_RATE"] // constants["READS_PER_SEC"]
     # Buffer for data slices for dashboard send
     data_buf = [[]]
     # Value used to communicate stop-command status between threads
     global close
     close = 0
     stream_setup(handle)
-    if (int(ljm.eStreamStart(handle, scansPerRead, NUM_CHANNELS, aScanList, SAMPLE_RATE)) != SAMPLE_RATE):
-        msg_to_dash(sock_lock,"\nERROR: Configured sample rate does not match actual sample rate")
+    if (int(ljm.eStreamStart(handle, scansPerRead, constants["NUM_CHANNELS"], aScanList, constants["SAMPLE_RATE"]))\
+        != constants["SAMPLE_RATE"]):
+        msg_to_dash(locks["sock_lock"],"\n[ERR] Configured sample rate does not match actual sample rate")
         ljm.close(handle)
         conn.close()
         return
@@ -497,17 +467,16 @@ def main():
     except Exception as e:
         print("\n[ERR] Got exception in dash sender and/or dash listener:\n"\
              + str(e))
-        msg_to_dash(locks['sock_lock'],"ERROR: Got exception in dash sender and/or dash listener:"\
+        msg_to_dash(locks['sock_lock'],"[ERR] Got exception in dash sender and/or dash listener:"\
              + str(e))
         ljm.close(handle)
         conn.close()
         return
     try:
-        collect_data(handle,fw,sock,data_buf,constants,locks)
+        collect_data(handle,fw,data_buf,constants,locks)
     except:
-        if close_lock.acquire():
-            close = 1
-            close_lock.release()
+        with locks["close_lock"]:
+                close = 1
     print("\n[INFO] Waiting on other threads to close for shutdown...")
     data_sender.join()
     dash_listener.join()
@@ -524,4 +493,4 @@ if __name__ == '__main__':
     \n===============================================================")
     main()
     print("\n[INFO] Restarting program")
-    # os.system("sudo reboot")``
+    
