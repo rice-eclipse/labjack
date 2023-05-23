@@ -1,0 +1,4 @@
+<?xml version='1.0' standalone='yes' ?>
+<LVData xmlns="http://www.ni.com/LVData">
+<Version>23.1f276</Version>
+<Cluster><Name>Settings in</Name><NumElts>2</NumElts><Cluster><Name>Network Configuration</Name><NumElts>3</NumElts><String><Name>IP Address</Name><Val>127.0.0.1</Val></String><DBL><Name>Port</Name><Val>5004.99999999999999</Val></DBL><Refnum><Name>TCP Network Connection Refnum</Name><RefKind>TCP</RefKind><Val>0x00000000</Val></Refnum></Cluster><Cluster><Name>Logging Configuration</Name><NumElts>2</NumElts><Path><Name>Log File Base Path</Name><Val>C:\Users\ajben\OneDrive\Documents\LabVIEW Data\Logged Data.tdms</Val></Path><Refnum><Name>TDMS File Reference</Name><RefKind>TDMS File</RefKind><Val>0x00000000</Val></Refnum></Cluster></Cluster></LVData>
