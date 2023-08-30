@@ -18,7 +18,7 @@ class DataLogger:
         self.handle             = None
         self.strikes            = 0
         try:
-            self.e_index = get_emergency_sensor_index()
+            self.e_index = get_emergency_sensor_index(config)
         except Exception as e:
             send_msg_to_operator(self.dash_sender, e)
             raise e
@@ -40,6 +40,7 @@ class DataLogger:
 
     def get_and_check_data_from_labjack(self):
         try:
+            print('attempting to read')
             max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
             new_rows = []
             for i in range(max_reads):
@@ -53,7 +54,7 @@ class DataLogger:
             return new_rows
         except Exception as e:
             send_msg_to_operator(self.dash_sender, "[E] Runtime exception during LabJack read " + str(e))
-            pass # Do not terminate program on read error
+            return new_rows # Do not terminate program on read error
 
     def write_data_to_sd(self, data):
         num_new_rows = int(len(data) / self.num_channels)

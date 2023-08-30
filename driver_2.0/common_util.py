@@ -1,5 +1,5 @@
 import numpy as np
-import datetime
+from datetime import datetime
 from labjack import ljm
 import csv
 
@@ -16,8 +16,8 @@ def set_close(close, close_lock):
 def setup_socket(sock):
     sock.listen()
     sock, _ = sock.accept()
-    # First message is always time since LabVIEW's epoch
-    filename = str(datetime.fromtimestamp(int(sock.recv(64).decode('utf-8')) - 2082844800 + 21600))
+    # First message after connection is always ms since epoch
+    filename = str(datetime.fromtimestamp(int(sock.recv(64).decode('utf-8')) / 1000))
     sock.settimeout(.5)
     return filename
 
@@ -50,8 +50,8 @@ def voltages_to_values(sensor_vals, config):
             scale_key = pt_num + '_scale'
 
         if offset_key and scale_key:
-            n_sensors[sensor_index] = np.round(
-                (sensor_vals[sensor_index] - float(config['conversion'][offset_key])) / float(config['conversion'][scale_key]), 2)
+            n_sensors[sensor_index] = np.round((sensor_vals[sensor_index] - float(config['conversion'][offset_key])) /\
+                                               float(config['conversion'][scale_key]), 2)
     return n_sensors.tolist()
 
 """
@@ -79,7 +79,7 @@ def open_file(config, filename):
     f = open("../data/" + filename + ".csv", "x")
     fd = csv.writer(f)
     # Write in the initial column labels
-    print("\n[I] Created new file in ../data/: ", filename)
+    print("[I] Created new file in ../data/: ", filename)
     cols = ["Time (s)"]
     for sensors in config["sensor_channel_mapping"]:
         cols.append(sensors)

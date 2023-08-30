@@ -47,15 +47,15 @@ class CmdListener:
     def listen(self):
         while not should_close():
             if (cmd := self.recv_cmd(self)) is not None:
-                print("\n[I] Received command: %s", str(cmd))
+                print("[I] Received command: %s", str(cmd))
                 decode_cmd = json.loads(cmd)
                 if decode_cmd["command"] == "close":
-                    print("\n[I] No longer listening for commands")
+                    print("[I] No longer listening for commands")
                     set_close(self.close, self.close_lock)
                 elif self.handle == None:
                     send_msg_to_operator(self.dash_sender, "[E] Dropping command; no active LabJack handle")
                 elif decode_cmd["command"] == "set_valve":
-                    print("\n[I] Setting driver %s to %s",self.config["driver_mapping"][str(decode_cmd["driver"])],decode_cmd["value"])
+                    print("[I] Setting driver %s to %s",self.config["driver_mapping"][str(decode_cmd["driver"])],decode_cmd["value"])
                     ljm.eWriteName(self.handle,self.config["driver_mapping"][str(decode_cmd["driver"])],decode_cmd["value"])
                 elif decode_cmd["command"] == "ignition":
                     if not self.ign_thread.is_alive(): self.ign_thread.start()

@@ -18,7 +18,7 @@ class DataSender:
         self.handle        = None
         self.prev_send     = 0
 
-        self.thread        = Thread(target = self.start_sending, args = (self,))
+        self.thread        = Thread(target = self.start_sending, args = (self))
 
         self.work_queue.put(lambda: self.sample_data_to_operator())
 
@@ -32,7 +32,7 @@ class DataSender:
     Helper method for debugging
     """
     def msg_to_dash(self, message):
-        print("\n" + message)
+        print(message)
         JSONData = {}
         JSONData['sensors'] = []
         JSONData['states'] = []
