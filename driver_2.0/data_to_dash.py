@@ -18,7 +18,7 @@ class DataSender:
         self.handle        = None
         self.prev_send     = 0
 
-        self.thread        = Thread(target = self.start_sending, args = (self))
+        self.thread        = Thread(target = self.start_sending, args = ())
 
         self.work_queue.put(lambda: self.sample_data_to_operator())
 
@@ -40,10 +40,9 @@ class DataSender:
         JSONObj = json.dumps(JSONData)
         sendStr = JSONObj.encode('UTF-8')
         try:
-            self.sock.send(len(sendStr).to_bytes(2,"big"))
             self.sock.sendall(sendStr)
         except socket.error:
-            print("\n[W] Failed to send console msg: %s !", message)
+            print("[W] Failed to send console msg: " + message)
 
     def add_work(self, task):
         self.work_queue.put(task)
@@ -51,7 +50,7 @@ class DataSender:
     def sample_data_to_operator(self):
         self.add_work(lambda: self.sample_data_to_operator())
         now = time.time() * 1000
-        if (now < self.config["general"]["dash_send_delay_ms"] + self.prev_send) or (self.handle == None):
+        if (now < int(self.config["general"]["dash_send_delay_ms"]) + self.prev_send) or (self.handle == None):
             time.sleep(.001)
             return
         self.prev_send = now
@@ -69,17 +68,18 @@ class DataSender:
         sendStr = JSONObj.encode('UTF-8')
         try:
             # Sends int length before message for dash to recv() w/ correct size
-            self.sock.send(len(sendStr).to_bytes(2,"big"))
+            print(sendStr)
+            print(type(self.sock))
             self.sock.sendall(sendStr)
         except socket.error:
-            print("\n[W] Connection issue! Waiting for reconnect before resend")
+            print("[W] Connection issue! Waiting for reconnect before resend")
             try:
                 _ = setup_socket(self.sock)
             except socket.timeout:
                 pass
 
     def start_sending(self):
-        while not should_close(self):
+        while not should_close(self.close, self.close_lock):
             task = self.work_queue.get()
             if task is None:
                 continue

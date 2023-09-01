@@ -8,8 +8,8 @@ class DataLogger:
         self.config             = config
         self.close              = close
         self.close_lock         = close_lock
-        self.data_buf_lock      = data_buf
-        self.data_buf           = data_buf_lock
+        self.data_buf_lock      = data_buf_lock
+        self.data_buf           = data_buf
         self.fd                 = fd
         self.dash_sender        = dash_sender
         self.sample_rate        = sample_rate
@@ -27,8 +27,8 @@ class DataLogger:
         self.start_reading()
 
     def check_for_emergency(self, sensor_readings):
-        if sensor_readings[-self.num_channels:][self.e_index] > self.config["proxima_emergency_shutdown"]:
-            '''we probably need to bound this condition so invalid readings from the sensor being
+        if sensor_readings[-self.num_channels:][self.e_index] > int(self.config["proxima_emergency_shutdown"]["max_pressure"]):
+            '''TODO: we probably need to bound this condition so invalid readings from the sensor being
                unplugged dont falsely trigger emergency'''
             self.strikes += 1
             if (self.strikes >= 3):
@@ -40,7 +40,6 @@ class DataLogger:
 
     def get_and_check_data_from_labjack(self):
         try:
-            print('attempting to read')
             max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
             new_rows = []
             for i in range(max_reads):
@@ -63,9 +62,9 @@ class DataLogger:
         timestamps   = np.round(np.linspace(start_time, end_time, num_new_rows), 5)
 
         dataR        = np.asarray(data).reshape(num_new_rows, self.num_channels)
-        write_data   = np.column_stack((np.transpose(timestamps), voltages_to_values(dataR)))
+        write_data   = np.column_stack((np.transpose(timestamps), voltages_to_values(self.config, dataR)))
 
-        self.share_to_dash(self, write_data[-1])
+        self.share_to_dash(write_data[-1].tolist())
         self.fd.writerows(write_data)
 
     def share_to_dash(self, new_rows):

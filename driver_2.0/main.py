@@ -30,6 +30,7 @@ import configparser
 import socket
 from threading import Lock
 from labjack import ljm
+import json
 
 def main():
     # Get config info from peer file
@@ -53,6 +54,15 @@ def main():
     # Wait for connection
     filename = setup_socket(sock)
     sock.settimeout(.5)
+
+    # JSONData = {}
+    # JSONData['sensors'] = [0,0,0,0]
+    # JSONData['states'] = [0,0,0,0]
+    # JSONData['console'] = "data"
+    # JSONData['timestamp'] = ""
+    # JSONObj = json.dumps(JSONData)
+    # sendStr = JSONObj.encode('UTF-8')
+    # sock.sendall(sendStr)
 
     # Open data file
     fd, f = open_file(config, filename)
@@ -78,7 +88,9 @@ def main():
         try: handle = ljm.openS("T7", "USB", "ANY")
         except Exception as e:
             send_msg_to_operator(dash_sender, "[E] During LabJack device setup" + str(e))
-            close(fd)
+            # close(fd)
+            ljm.close(handle)
+            close[0] = 1
             raise e
 
         # Default all drivers (in case of improper shutdown)
@@ -87,7 +99,9 @@ def main():
         try: stream_setup(config, handle, NUM_CHANNELS, SAMPLE_RATE, READS_PER_SEC)
         except Exception as e:
             send_msg_to_operator(dash_sender, "[E] During stream setup: " + str(e))
-            close(fd)
+            # close(fd)
+            ljm.close(handle)
+            close[0] = 1
             raise e
 
         dash_sender.handle  = handle
@@ -102,6 +116,7 @@ def main():
 
         clear_drivers(config, handle)
         close(fd)
+        ljm.close(handle)
         return
 
 if __name__ == '__main__':

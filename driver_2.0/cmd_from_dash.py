@@ -15,8 +15,8 @@ class CmdListener:
         self.handle      = None
         self.dash_sender = dash_sender
 
-        self.cmd_thread  = Thread(target = self.listen, args = (self,))
-        self.ign_thread  = Thread(target = self.ignition_sequence, args = (self,))
+        self.cmd_thread  = Thread(target = self.listen, args = ())
+        self.ign_thread  = Thread(target = self.ignition_sequence, args = ())
 
     def start_thread(self):
         self.thread.start()
@@ -45,8 +45,8 @@ class CmdListener:
         self.cmd_thread.start()
 
     def listen(self):
-        while not should_close():
-            if (cmd := self.recv_cmd(self)) is not None:
+        while not should_close(self.close, self.close_lock):
+            if (cmd := self.recv_cmd()) is not None:
                 print("[I] Received command: %s", str(cmd))
                 decode_cmd = json.loads(cmd)
                 if decode_cmd["command"] == "close":

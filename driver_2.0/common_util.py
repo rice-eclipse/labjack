@@ -21,7 +21,7 @@ def setup_socket(sock):
     sock.settimeout(.5)
     return filename
 
-def voltages_to_values(sensor_vals, config):
+def voltages_to_values(config, sensor_vals):
     if sensor_vals.size == 0: return []
     n_sensors = sensor_vals.copy()
     sensor_keys = list(config['sensor_channel_mapping'].keys())
