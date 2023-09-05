@@ -70,8 +70,8 @@ class DataSender:
         JSONObj = json.dumps(JSONData)
         sendStr = JSONObj.encode('UTF-8')
         try:
-            # print(sendStr)
-            self.sock.sendall(sendStr)
+            print(sendStr)
+            # self.sock.sendall(sendStr)
         except Exception as e:
             print("[W] Connection issue! Waiting for reconnect before resend: " + str(e))
             try:

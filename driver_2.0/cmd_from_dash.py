@@ -48,7 +48,7 @@ class CmdListener:
         try:
             while not should_close(self.close, self.close_lock):
                 cmd = self.recv_cmd()
-                if cmd is not None and cmd is not "":
+                if (cmd is not None) and (cmd != ""):
                     try:
                         decode_cmd = json.loads(cmd)
                     except:
@@ -56,6 +56,7 @@ class CmdListener:
                         send_msg_to_operator(self.dash_sender, "[W] Invalid command syntax received!")
                         continue
                     print("[I] Received command: " + str(cmd))
+                    if "command" not in decode_cmd: continue
                     if decode_cmd["command"] == "close":
                         print("[I] No longer listening for commands")
                         set_close(self.close, self.close_lock)
