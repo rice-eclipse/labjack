@@ -25,11 +25,12 @@ Run-on-startup config at: /home/eclipsepi/.config/systemd/user/labjack.service
 from data_to_dash import DataSender
 from logging_and_eshutdown import DataLogger
 from cmd_from_dash import CmdListener
-from common_util import setup_socket, open_file, send_msg_to_operator, clear_drivers, stream_setup
+from common_util import setup_socket, open_file, send_msg_to_operator, clear_drivers, stream_setup, set_close
 import configparser
 import socket
 from threading import Lock
 from labjack import ljm
+import json
 
 def main():
     # Get config info from peer file
@@ -40,88 +41,77 @@ def main():
     NUM_CHANNELS  = len(config["sensor_channel_mapping"].keys())
 
     # Setup socket for mission control
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    setup_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    setup_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
     print("[I] Binding socket to " + str(config["general"]["HOST"])\
           + ":" + str(config["general"]["PORT"]))
 
-    sock.bind((config["general"]["HOST"], int(config["general"]["PORT"])))
-
-    print("[I] Waiting for connection request...")
+    setup_sock.bind((config["general"]["HOST"], int(config["general"]["PORT"])))
 
     # Wait for connection
-    filename = setup_socket(sock)
-    sock.settimeout(.5)
+    filename, sock = setup_socket(setup_sock)
+    setup_sock.settimeout(.5)
 
-    # JSONData = {}
-    # JSONData['sensors'] = [0,0,0,0]
-    # JSONData['states'] = [0,0,0,0]
-    # JSONData['console'] = "data"
-    # JSONData['timestamp'] = ""
-    # JSONObj = json.dumps(JSONData)
-    # sendStr = JSONObj.encode('UTF-8')
-    # sock.sendall(sendStr)
+    JSONData = {}
+    JSONData['sensors'] = [0,0,0,0]
+    JSONData['states'] = [0,0,0,0]
+    JSONData['console'] = "data"
+    JSONData['timestamp'] = ""
+    JSONObj = json.dumps(JSONData)
+    sendStr = JSONObj.encode('UTF-8')
+    sock.sendall(sendStr)
 
+    fd, f = open_file(config, filename)
     try:
-        fd, f = open_file(config, filename)
-
         # Start necessary workers
-        with f, sock:
-            try:
-                close         = [0] # global shutdown indicator
-                close_lock    = Lock()
-                data_buf      = [[]] # special buffer for data sent to dashboard
-                data_buf_lock = Lock()
+        close         = [0] # global shutdown indicator
+        close_lock    = Lock()
+        data_buf      = [[]] # special buffer for data sent to dashboard
+        data_buf_lock = Lock()
 
-                dash_sender = DataSender(config, sock, close, close_lock, data_buf, data_buf_lock)
-                dash_sender.start_thread()
-            except Exception as e:
-                print("[E] Exception from data sender:" + e)
-                raise e
+        dash_sender = DataSender(config, setup_sock, sock, close, close_lock, data_buf, data_buf_lock)
+        dash_sender.start_thread()
 
-            try:
-                cmd_listener = CmdListener(config, sock, close, close_lock, dash_sender)
-                cmd_listener.start_thread()
-            except Exception as e:
-                send_msg_to_operator(dash_sender, "[E] Exception from command listener:" + e)
-                raise e
+        cmd_listener = CmdListener(config, sock, close, close_lock, dash_sender)
+        cmd_listener.start_thread()
+        dash_sender.cmd_listener = cmd_listener
 
             # Open connection to LabJack device
-            try:
-                data_logger = DataLogger(config, close, close_lock, data_buf, data_buf_lock, \
-                                        fd, dash_sender, SAMPLE_RATE, NUM_CHANNELS)
-                handle = ljm.openS("T7", "USB", "ANY")
-            except Exception as e:
-                send_msg_to_operator(dash_sender, "[E] Exception during LabJack device setup:" + str(e))
-                raise e
 
-            try:
-                # Default all drivers (in case of improper shutdown)
-                clear_drivers(config, handle)
-                stream_setup(config, handle, NUM_CHANNELS, SAMPLE_RATE, READS_PER_SEC)
+        data_logger = DataLogger(config, close, close_lock, data_buf, data_buf_lock, \
+                                fd, dash_sender, SAMPLE_RATE, NUM_CHANNELS)
+        handle = ljm.openS("T7", "USB", "ANY")
 
-                dash_sender.handle  = handle
-                cmd_listener.handle = handle
-                data_logger.handle  = handle
+        # Default all drivers (in case of improper shutdown)
+        clear_drivers(config, handle)
+        stream_setup(config, handle, NUM_CHANNELS, SAMPLE_RATE, READS_PER_SEC)
 
-                data_logger.start_reading() # Using main thread
-                # Wait for shutdown condition
-                dash_sender.join_thread()
-                cmd_listener.join_thread()
-            except Exception as e:
-                send_msg_to_operator(dash_sender, "[E] Exception during stream: " + str(e))
-                raise e
-    except:
+        dash_sender.handle  = handle
+        cmd_listener.handle = handle
+        data_logger.handle  = handle
+        data_logger.start_reading() # Using main thread
+
+        # Wait for shutdown condition
+    except (Exception, KeyboardInterrupt) as e:
+        print("[E] Exception: " + str(e))
+        set_close(close, close_lock)
         try: clear_drivers(config, handle)
         except: pass
+        ljm.eStreamStop(handle)
         ljm.close(handle)
-        close[0] = 1
+        sock.close()
+        dash_sender.join_thread()
+        cmd_listener.join_thread()
         raise e
 
     try: clear_drivers(config, handle)
     except: pass
+    ljm.eStreamStop(handle)
     ljm.close(handle)
+    sock.close()
+    dash_sender.join_thread()
+    cmd_listener.join_thread()
     return
 
 if __name__ == '__main__':

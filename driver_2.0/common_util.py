@@ -13,13 +13,14 @@ def set_close(close, close_lock):
     with close_lock:
         close[0] = 1
 
-def setup_socket(sock):
-    sock.listen()
-    sock, _ = sock.accept()
+def setup_socket(setup_sock):
+    print("[I] Waiting for connection request...")
+    setup_sock.listen()
+    sock = setup_sock.accept()[0]
+    sock.settimeout(.5)
     # First message after connection is always ms since epoch
     filename = str(datetime.fromtimestamp(int(sock.recv(64).decode('utf-8')) / 1000))
-    sock.settimeout(.5)
-    return filename
+    return filename, sock
 
 def voltages_to_values(config, sensor_vals):
     if sensor_vals.size == 0: return []
@@ -70,9 +71,12 @@ def get_valve_states(handle):
     statebin = format(int(ljm.eReadName(handle,"EIO_STATE")),'05b')
     for char in statebin:
         states.append(int(char))
+    statebin = format(int(ljm.eReadName(handle,"CIO_STATE")),'04b')
+    states = [(int(statebin[1]))] + states
     return states[::-1]
 
 def send_msg_to_operator(dash_sender, msg):
+    print(msg)
     dash_sender.add_work(lambda: dash_sender.msg_to_dash(msg))
 
 def open_file(config, filename):
