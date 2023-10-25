@@ -1,2 +1,0 @@
--Add a safe mode setting. If connection lost for some period of time 
-default to approachable mode
