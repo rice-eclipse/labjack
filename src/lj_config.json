@@ -118,7 +118,7 @@
         {
             "label": "Ignition",
             "label_actuate": "Ignite",
-            "label_deactuate": "Shufoff",
+            "label_deactuate": "Shutoff",
             "pin": 17,
             "protected": true
         }
