@@ -19,10 +19,13 @@ class DataSender:
         self.cmd_listener  = None
         self.handle        = None
         self.prev_send     = 0
+        self.disconnect_t  = None
 
         self.thread        = Thread(target = self.start_sending, args = ())
 
         self.work_queue.put(lambda: self.sample_data_to_operator())
+
+        self.VALVE_RESET_SECS = int(self.config['general']['reset_valves_min']) * 60
 
     def start_thread(self):
         self.thread.start()
@@ -58,7 +61,7 @@ class DataSender:
         states = []
         JSONData = {}
         states = get_valve_states(self.handle)
-        print(states)
+        # print(states)
         # Access to dataBuf from main() thread
         if self.data_buf_lock.acquire(timeout = .01):
             JSONData['sensors'] = self.data_buf[0]
@@ -142,10 +145,21 @@ class DataSender:
             self.sock.sendall(sendStr2)
             time.sleep(.2)
             self.sock.sendall(sendStr3)
-
+            # time.sleep(.2)
+            self.disconnect_t = None
 
         except Exception as e:
             print("[W] Connection issue! Waiting for reconnect before resend: " + str(e))
+
+            if self.disconnect_t is None:
+                self.disconnect_t = time.time()
+            else:
+                secs_remaining = self.VALVE_RESET_SECS - (time.time() - self.disconnect_t)
+                if secs_remaining < 0:
+                    set_close(self.close, self.close_lock)
+                else:
+                    print(f"[W] Valve states will automatically reset in: {'{:02d}'.format(int(secs_remaining // 60))}:{'{:02d}'.format(int(secs_remaining % 60))}")
+
             try:
                 self.sock = setup_socket(self.setup_sock)
                 self.cmd_listener.sock = self.sock
@@ -162,4 +176,3 @@ class DataSender:
         except Exception as e:
             set_close(self.close, self.close_lock)
             raise e
-
