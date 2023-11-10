@@ -38,8 +38,9 @@ class CmdListener:
     def ignition_sequence(self):
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
         send_msg_to_operator(self.dash_sender, "[I] Igniting...")
-        time.sleep(5)
+        time.sleep(10)
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
+        self.ign_thread  = Thread(target = self.ignition_sequence, args = ())
 
     def start_thread(self):
         self.cmd_thread.start()
