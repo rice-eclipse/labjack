@@ -136,16 +136,11 @@ class DataSender:
             elif states[i] == 1: tfstates.append(True)
         statesmsg["values"] = tfstates
         sendStr3 = json.dumps(statesmsg).encode('UTF-8')
+        full_msg = {"tcs": message0, "pts": message1, "lcs": message2, "driver": statesmsg}
+        sendstr = json.dumps(full_msg).encode('UTF-8')
         try:
-            print("\nTHERMOS: " + str(sendStr0) + "\nPTS: " + str(sendStr1) + "\nLCS: " + str(sendStr2) + "\nSTATES: " + str(sendStr3))
-            self.sock.sendall(sendStr0)
-            time.sleep(.2)
-            self.sock.sendall(sendStr1)
-            time.sleep(.2)
-            self.sock.sendall(sendStr2)
-            time.sleep(.2)
-            self.sock.sendall(sendStr3)
-            # time.sleep(.2)
+            print(sendstr)
+            self.sock.sendall(sendstr)
             self.disconnect_t = None
 
         except Exception as e:
