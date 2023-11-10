@@ -124,10 +124,6 @@ class DataSender:
         reading["reading"] = buf_data[0]
         message2["readings"] += [dict(reading)]
 
-        sendStr0 = json.dumps(message0).encode('UTF-8')
-        sendStr1 = json.dumps(message1).encode('UTF-8')
-        sendStr2 = json.dumps(message2).encode('UTF-8')
-
         statesmsg = {}
         statesmsg["type"] = "DriverValue"
         tfstates = []
@@ -135,16 +131,13 @@ class DataSender:
             if states[i] == 0: tfstates.append(False)
             elif states[i] == 1: tfstates.append(True)
         statesmsg["values"] = tfstates
-        sendStr3 = json.dumps(statesmsg).encode('UTF-8')
+        
+        full_msg = {"tcs": message0, "pts": message1, "lcs": message2, "driver": statesmsg}
+        sendstr = json.dumps(full_msg).encode('UTF-8')
         try:
             # print("\nTHERMOS: " + str(sendStr0) + "\nPTS: " + str(sendStr1) + "\nLCS: " + str(sendStr2) + "\nSTATES: " + str(sendStr3))
-            self.sock.sendall(sendStr0)
-            time.sleep(.2)
-            self.sock.sendall(sendStr1)
-            time.sleep(.2)
-            self.sock.sendall(sendStr2)
-            time.sleep(.2)
-            self.sock.sendall(sendStr3)
+            self.sock.sendall(sendstr)
+            time.sleep(.6)
             # time.sleep(.2)
             self.disconnect_t = None
 
