@@ -11,18 +11,18 @@
                 {
                     "label": "TC1: Oxidizer tank",
                     "color": "#FF80D5",
-                    "units": "°C",
-                    "calibration_intercept": 0,
-                    "calibration_slope": 1,
+                    "units": "°F",
+                    "calibration_intercept": 32,
+                    "calibration_slope": 1.8,
                     "adc": 0,
                     "channel": 0
                 },
                 {
                     "label": "TC2: Combustion chamber",
                     "color": "#FF5533",
-                    "units": "°C",
-                    "calibration_intercept": 0,
-                    "calibration_slope": 1,
+                    "units": "°F",
+                    "calibration_intercept": 32,
+                    "calibration_slope": 1.8,
                     "adc": 0,
                     "channel": 1
                 }
