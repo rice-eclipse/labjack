@@ -47,7 +47,7 @@ class DataLogger:
                 new_rows += list(read_val[0])
                 samples_in_ljm_buff = read_val[2]
                 # print(samples_in_ljm_buff)
-                self.check_for_emergency(new_rows)
+                # self.check_for_emergency(new_rows)
                 self.total_samples_read += 1
                 if self.total_samples_read % 1000 == 0: print("[I] " + str(self.total_samples_read) + " samples obtained")
                 if samples_in_ljm_buff == 0:
