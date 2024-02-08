@@ -19,10 +19,13 @@ class DataSender:
         self.cmd_listener  = None
         self.handle        = None
         self.prev_send     = 0
+        self.disconnect_t  = None
 
         self.thread        = Thread(target = self.start_sending, args = ())
 
         self.work_queue.put(lambda: self.sample_data_to_operator())
+
+        self.VALVE_RESET_SECS = int(self.config['general']['reset_valves_min']) * 60
 
     def start_thread(self):
         self.thread.start()
@@ -58,7 +61,7 @@ class DataSender:
         states = []
         JSONData = {}
         states = get_valve_states(self.handle)
-        print(states)
+        # print(states)
         # Access to dataBuf from main() thread
         if self.data_buf_lock.acquire(timeout = .01):
             JSONData['sensors'] = self.data_buf[0]
@@ -121,31 +124,33 @@ class DataSender:
         reading["reading"] = buf_data[0]
         message2["readings"] += [dict(reading)]
 
-        sendStr0 = json.dumps(message0).encode('UTF-8')
-        sendStr1 = json.dumps(message1).encode('UTF-8')
-        sendStr2 = json.dumps(message2).encode('UTF-8')
-
         statesmsg = {}
         statesmsg["type"] = "DriverValue"
         tfstates = []
-        for i in range(3):
+        for i in range(len(states)):
             if states[i] == 0: tfstates.append(False)
             elif states[i] == 1: tfstates.append(True)
         statesmsg["values"] = tfstates
         sendStr3 = json.dumps(statesmsg).encode('UTF-8')
+        full_msg = {"tcs": message0, "pts": message1, "lcs": message2, "driver": statesmsg}
+        sendstr = json.dumps(full_msg).encode('UTF-8')
         try:
-            # print("\nTHERMOS: " + str(sendStr0) + "\nPTS: " + str(sendStr1) + "\nLCS: " + str(sendStr2) + "\nSTATES: " + str(sendStr3))
-            self.sock.sendall(sendStr0)
-            time.sleep(.2)
-            self.sock.sendall(sendStr1)
-            time.sleep(.2)
-            self.sock.sendall(sendStr2)
-            time.sleep(.2)
-            self.sock.sendall(sendStr3)
-
+            #print(sendstr)
+            self.sock.sendall(sendstr)
+            self.disconnect_t = None
 
         except Exception as e:
             print("[W] Connection issue! Waiting for reconnect before resend: " + str(e))
+
+            if self.disconnect_t is None:
+                self.disconnect_t = time.time()
+            else:
+                secs_remaining = self.VALVE_RESET_SECS - (time.time() - self.disconnect_t)
+                if secs_remaining < 0:
+                    set_close(self.close, self.close_lock)
+                else:
+                    print(f"[W] Valve states will automatically reset in: {'{:02d}'.format(int(secs_remaining // 60))}:{'{:02d}'.format(int(secs_remaining % 60))}")
+
             try:
                 self.sock = setup_socket(self.setup_sock)
                 self.cmd_listener.sock = self.sock
@@ -162,4 +167,3 @@ class DataSender:
         except Exception as e:
             set_close(self.close, self.close_lock)
             raise e
-

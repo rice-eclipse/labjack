@@ -10,19 +10,19 @@
             "sensors": [
                 {
                     "label": "TC1: Oxidizer tank",
-                    "color": "#FC6453",
-                    "units": "°C",
-                    "calibration_intercept": 0,
-                    "calibration_slope": 1,
+                    "color": "#FF80D5",
+                    "units": "°F",
+                    "calibration_intercept": 32,
+                    "calibration_slope": 1.8,
                     "adc": 0,
                     "channel": 0
                 },
                 {
                     "label": "TC2: Combustion chamber",
-                    "color": "#EF3B9E",
-                    "units": "°C",
-                    "calibration_intercept": 0,
-                    "calibration_slope": 1,
+                    "color": "#FF5533",
+                    "units": "°F",
+                    "calibration_intercept": 32,
+                    "calibration_slope": 1.8,
                     "adc": 0,
                     "channel": 1
                 }
@@ -37,7 +37,7 @@
                 {
                     "label": "PT1: Combustion chamber",
                     "units": "psi",
-                    "color": "#EBF927",
+                    "color": "#D9D916",
                     "calibration_intercept": 0,
                     "calibration_slope": 1,
                     "rolling_average_width": 10,
@@ -46,9 +46,9 @@
                     "channel": 0
                 },
                 {
-                    "label": "PT2: Oxidizer feedline",
+                    "label": "PT2: Feedline",
                     "units": "psi",
-                    "color": "#1D8718",
+                    "color": "#23B31B",
                     "calibration_intercept": 0,
                     "calibration_slope": 1,
                     "adc": 1,
@@ -57,7 +57,7 @@
                 {
                     "label": "PT3: Injector",
                     "units": "psi",
-                    "color": "#4104D1",
+                    "color": "#9122E6",
                     "calibration_intercept": 0,
                     "calibration_slope": 1,
                     "rolling_average_width": 10,
@@ -66,7 +66,7 @@
                 },
                 {
                     "label": "PT4: Oxidizer tank",
-                    "color": "#F9864D",
+                    "color": "#FF7926",
                     "units": "psi",
                     "calibration_intercept": 0,
                     "calibration_slope": 1,
@@ -102,7 +102,7 @@
             "protected": false
         },
         {
-            "label": "Ox tank vent",
+            "label": "Ox vent",
             "label_actuate": "Open",
             "label_deactuate": "Close",
             "pin": 13,
@@ -116,9 +116,16 @@
             "protected": false
         },
         {
+            "label": "Pressurization",
+            "label_actuate": "Open",
+            "label_deactuate": "Close",
+            "pin": 6,
+            "protected": false
+        },
+        {
             "label": "Ignition",
             "label_actuate": "Ignite",
-            "label_deactuate": "Shufoff",
+            "label_deactuate": "Shutoff",
             "pin": 17,
             "protected": true
         }
@@ -174,6 +181,11 @@
             "type": "Actuate",
             "driver_id": 2,
             "value": true
+        },
+        {
+            "type": "Actuate",
+            "driver_id": 3,
+            "value": false
         },
         {
             "type": "Actuate",
