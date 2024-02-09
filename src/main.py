@@ -55,15 +55,6 @@ def main():
     sock = setup_socket(setup_sock)
     setup_sock.settimeout(.5)
 
-    JSONData = {}
-    JSONData['sensors'] = [0,0,0,0]
-    JSONData['states'] = [0,0,0,0]
-    JSONData['console'] = "data"
-    JSONData['timestamp'] = ""
-    JSONObj = json.dumps(JSONData)
-    sendStr = JSONObj.encode('UTF-8')
-    sock.sendall(sendStr)
-
     fd, f = open_file(config)
     try:
         # Start necessary workers
