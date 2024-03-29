@@ -67,7 +67,7 @@ class DataLogger:
 
     def write_data_to_sd(self, data):
         '''
-        Takes voltage readings from get_and_check_data_from_labjack(), converts voltage values to, 
+        Takes voltage readings from get_and_check_data_from_labjack(), converts voltage values to
         readable data using voltage_to_values(), formats the values, and writes them to an SD card.
         
         Inputs:

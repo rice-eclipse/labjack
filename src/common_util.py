@@ -38,6 +38,8 @@ def voltages_to_values(config, sensor_vals):
         - config, a filename to load values from a config file
         - sensor_vals, a list of lists containing formatted voltage readings
 
+    Outputs:
+        - (n_sensors).tolist(), a list of converted sensor values
     '''
     if sensor_vals.size == 0: return []
     n_sensors = sensor_vals.copy()
@@ -96,6 +98,14 @@ def send_msg_to_operator(dash_sender, msg):
     dash_sender.add_work(lambda: dash_sender.msg_to_dash(msg))
 
 def open_file(config):
+    '''
+    Opens given config file and returns the opened file and a writer object.
+    
+    Inputs:
+        - config, a ConfigParser object loaded with data from a config file
+        
+    Outputs:
+        - (fd, f), a tuple containing fd, a csv.writer object, and f, the opened config file'''
     filename = next_test_data_filename("../data")
     f = open("../data/" + filename + ".csv", "x")
     fd = csv.writer(f)
