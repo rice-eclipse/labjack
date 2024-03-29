@@ -39,6 +39,13 @@ class DataLogger:
             self.strikes = 0
 
     def get_and_check_data_from_labjack(self):
+        '''
+        Samples and returns data from sensors.
+        
+        Inputs: None
+            
+        Outputs:
+            - new_rows, a list containing voltage value readings from sensors'''
         try:
             max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
             new_rows = []
@@ -59,12 +66,21 @@ class DataLogger:
             return new_rows # Do not terminate program on read error
 
     def write_data_to_sd(self, data):
+        '''
+        Takes voltage readings from get_and_check_data_from_labjack(), converts voltage values to, 
+        readable data using voltage_to_values(), formats the values, and writes them to an SD card.
+        
+        Inputs:
+            - data, a list of voltage value readings from the sensors
+            
+        Outputs: None'''
         num_new_rows = int(len(data) / self.num_channels)
         start_time   = (self.total_samples_read - num_new_rows) / self.sample_rate
         end_time     = (self.total_samples_read - 1) / self.sample_rate
         timestamps   = np.round(np.linspace(start_time, end_time, num_new_rows), 5)
 
         dataR        = np.asarray(data).reshape(num_new_rows, self.num_channels)
+        # This creates an nx2 "augmented" matrix with timestamps set equal to a list of converted readings.
         write_data   = np.column_stack((np.transpose(timestamps), voltages_to_values(self.config, dataR)))
 
         self.share_to_dash(write_data[-1].tolist())
@@ -77,5 +93,11 @@ class DataLogger:
 
     # Effective "main"
     def start_reading(self):
+        '''
+        Effectively the "main" function of DataLogger.
+        
+        Inputs: None
+            
+        Ouputs: None'''
         while not should_close(self.close, self.close_lock):
             self.write_data_to_sd(self.get_and_check_data_from_labjack())
