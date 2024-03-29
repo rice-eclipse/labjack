@@ -31,6 +31,14 @@ def setup_socket(setup_sock):
     return sock
 
 def voltages_to_values(config, sensor_vals):
+    '''
+    Reads voltage values from sensors and converts them into readable sensor values.
+    
+    Inputs:
+        - config, a filename to load values from a config file
+        - sensor_vals, a list of lists containing formatted voltage readings
+
+    '''
     if sensor_vals.size == 0: return []
     n_sensors = sensor_vals.copy()
     sensor_keys = list(config['sensor_channel_mapping'].keys())
