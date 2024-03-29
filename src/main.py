@@ -42,6 +42,18 @@ def main():
     READS_PER_SEC = int(config["general"]["reads_per_sec"])
     NUM_CHANNELS  = len(config["sensor_channel_mapping"].keys())
 
+    # Swap over the configs to be loaded from the JSON config.json file.
+    # DataLogger and potentially others use fd, which is a csv.writer object.
+    # I'm unsure how the following code could affect this.
+    
+    # config_file = open('config.json')
+    # config = json.load(config_file)
+    # config_file.close()
+
+    # SAMPLE_RATE = int(config["general"]["sample_rate"])
+    # READS_PER_SEC = int(config["general"]["reads_per_sec"])
+    # NUM_CHANNELS = len(config["sensor_channel_mapping"].keys())
+
     # Setup socket for mission control
     setup_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     setup_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
