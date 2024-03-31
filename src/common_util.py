@@ -105,7 +105,7 @@ def open_file(config):
         - config, a ConfigParser object loaded with data from a config file
         
     Outputs:
-        - (fd, f), a tuple containing fd, a csv.writer object, and f, the opened config file'''
+        - (fd, f), a tuple containing fd, a csv.writer object, and f, the opened next data log file'''
     filename = next_test_data_filename("../data")
     f = open("../data/" + filename + ".csv", "x")
     fd = csv.writer(f)
