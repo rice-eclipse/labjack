@@ -1,7 +1,7 @@
 {
     "general": {
-        "host": "192.168.0.100",
-        "port": 2707,
+        "HOST": "192.168.0.100",
+        "PORT": 2707,
         "dash_send_delay_ms": 500,
         "sample_rate": 300,
         "reads_per_sec": 300,
