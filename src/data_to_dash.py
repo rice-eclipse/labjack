@@ -69,60 +69,40 @@ class DataSender:
             if not JSONData['sensors']: return
             self.data_buf_lock.release()
         else: return
+    
+        buf_reorg_data = [buf_data[6], buf_data[7], buf_data[10], buf_data[11],
+                          buf_data[12],buf_data[13], buf_data[0]]
+        
+        tc_data ={}
+        pt_data ={}
+        lc_data = {}
+        full_msg = {"tcs": tc_data, "pts": pt_data, "lcs":lc_data}
+        #populates the sensor data
+        grp_id = 0
+        total_sensor_count = 0
+        for sensor_grp in full_msg.values():
+                sensor_grp["type"] = "SensorValue"
+                sensor_grp["group_id"] = grp_id
 
-        message0 = {}
-        message0["type"] = "SensorValue"
-        message0["group_id"] = 0
-        message0["readings"] = []
+                #gets the reading for each sensor in each sensor group
+                readings = []
+                sensor_count = len(self.config["sensor_groups"][grp_id]["sensors"])
+                for sensor_id in range(sensor_count):
+                        reading = {}
+                        reading["sensor_id"] = sensor_id
 
-        # thermo 1
-        reading = {}
-        reading["sensor_id"] = 0
-        reading["reading"] = buf_data[6]
-        reading["time"] = {}
-        reading["time"]["secs_since_epoch"] = int(time.time())
-        reading["time"]["nanos_since_epoch"] = 0
-        message0["readings"] += [dict(reading)]
+                        #thermo data starts from column 6
+                        reading["reading"] = buf_reorg_data[total_sensor_count]
+                        #print(grp_id+sensor_id)
+                        reading["time"] = {}
+                        reading["time"]["secs_since_epoch"] = 0
+                        reading["time"]["nanos_since_epoch"] = 0
+                        #print(reading)
+                        readings.append(reading)
+                        total_sensor_count += 1
 
-        # thermo 2
-        reading["sensor_id"] = 1
-        reading["reading"] = buf_data[7]
-        message0["readings"] += [dict(reading)]
-
-        message1 = {}
-        message1["type"] = "SensorValue"
-        message1["group_id"] = 1
-        message1["readings"] = []
-
-        # pt 1
-        reading["sensor_id"] = 0
-        reading["reading"] = buf_data[10]
-        message1["readings"] += [dict(reading)]
-
-        # pt 2
-        reading["sensor_id"] = 1
-        reading["reading"] = buf_data[11]
-        message1["readings"] += [dict(reading)]
-
-        # pt 3
-        reading["sensor_id"] = 2
-        reading["reading"] = buf_data[12]
-        message1["readings"] += [dict(reading)]
-
-        # pt 4
-        reading["sensor_id"] = 3
-        reading["reading"] = buf_data[13]
-        message1["readings"] += [dict(reading)]
-
-        message2 = {}
-        message2["type"] = "SensorValue"
-        message2["group_id"] = 2
-        message2["readings"] = []
-
-        # lc 1 (small)
-        reading["sensor_id"] = 0
-        reading["reading"] = buf_data[0]
-        message2["readings"] += [dict(reading)]
+                sensor_grp["readings"] = readings
+                grp_id += 1
 
         statesmsg = {}
         statesmsg["type"] = "DriverValue"
@@ -132,7 +112,7 @@ class DataSender:
             elif states[i] == 1: tfstates.append(True)
         statesmsg["values"] = tfstates
         sendStr3 = json.dumps(statesmsg).encode('UTF-8')
-        full_msg = {"tcs": message0, "pts": message1, "lcs": message2, "driver": statesmsg}
+        full_msg["driver"] = statesmsg
         sendstr = json.dumps(full_msg).encode('UTF-8')
         try:
             #print(sendstr)
