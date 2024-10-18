@@ -6,7 +6,7 @@ from threading import Thread
 from labjack import ljm
 
 class CmdListener:
-    def __init__(self, config, sock, close, close_lock, dash_sender):
+    def __init__(self, config, sock: socket.socket, close, close_lock, dash_sender):
         self.config      = config
         self.sock        = sock
         self.close       = close
@@ -25,7 +25,7 @@ class CmdListener:
 
     def recv_cmd(self):
         try:
-            return self.sock.recv(2048).decode('utf-8')
+            return self.sock.recv(1024 * 128).decode('utf-8')
         except socket.timeout:
             time.sleep(.001)
             return None

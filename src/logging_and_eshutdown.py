@@ -73,6 +73,7 @@ class DataLogger:
         if self.data_buf_lock.acquire(timeout = .05):
             self.data_buf[0] = new_rows[-self.num_channels:]
             self.data_buf_lock.release()
+        # print("failed to acquire dash lock")
 
     # Effective "main"
     def start_reading(self):

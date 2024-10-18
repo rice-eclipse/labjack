@@ -24,6 +24,7 @@ class DataSender:
         self.thread        = Thread(target = self.start_sending, args = ())
 
         self.work_queue.put(lambda: self.sample_data_to_operator())
+        print("created data sender")
 
         self.VALVE_RESET_SECS = int(self.config['general']['reset_valves_min']) * 60
 
@@ -66,9 +67,15 @@ class DataSender:
         if self.data_buf_lock.acquire(timeout = .01):
             JSONData['sensors'] = self.data_buf[0]
             buf_data = self.data_buf[0]
-            if not JSONData['sensors']: return
+            if not JSONData['sensors']: 
+                self.data_buf_lock.release()
+                return
             self.data_buf_lock.release()
-        else: return
+        else: 
+            print("Failed to obtain databuf lock")
+            return
+        
+        print("hi")
 
         message0 = {}
         message0["type"] = "SensorValue"
@@ -137,6 +144,7 @@ class DataSender:
         try:
             #print(sendstr)
             self.sock.sendall(sendstr)
+            print(f"Sent: {sendstr[:40]}")
             self.disconnect_t = None
 
         except Exception as e:

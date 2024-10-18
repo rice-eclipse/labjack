@@ -63,6 +63,7 @@ def main():
     JSONObj = json.dumps(JSONData)
     sendStr = JSONObj.encode('UTF-8')
     sock.sendall(sendStr)
+    print(sendStr)
 
     fd, f = open_file(config)
     try:
