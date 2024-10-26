@@ -33,6 +33,7 @@ from labjack import ljm
 import json
 import time
 from datetime import datetime
+import websockets
 
 def main():
     # Get config info from peer file
@@ -45,15 +46,15 @@ def main():
     # Setup socket for mission control
     setup_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     setup_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
     print("[I] Binding socket to " + str(config["general"]["HOST"])\
-          + ":" + str(config["general"]["PORT"]))
+        + ":" + str(config["general"]["PORT"]))
 
     setup_sock.bind((config["general"]["HOST"], int(config["general"]["PORT"])))
 
     # Wait for connection
     sock = setup_socket(setup_sock)
     setup_sock.settimeout(.5)
+
 
     JSONData = {}
     JSONData['sensors'] = [0,0,0,0]
@@ -80,7 +81,7 @@ def main():
         cmd_listener.start_thread()
         dash_sender.cmd_listener = cmd_listener
 
-            # Open connection to LabJack device
+        # Open connection to LabJack device
 
         data_logger = DataLogger(config, close, close_lock, data_buf, data_buf_lock, \
                                 fd, dash_sender, SAMPLE_RATE, NUM_CHANNELS)
