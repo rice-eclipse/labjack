@@ -1,6 +1,7 @@
 """
 Data Acquisition and Remote Control for Eclipse Hybrid Engines
 Spencer Darwall, Avionics & Software Lead '22-23
+Ian Rundle, President '23-24
 
 Code interfaces with LabJack device hardware via LJM Library. The LabJack
 has input pins for each sensor and output pins for each driver- this script logs
@@ -34,8 +35,9 @@ import json
 import time
 from datetime import datetime
 import websockets
+import asyncio
 
-def main():
+async def main():
     # Get config info from peer file
     config = configparser.ConfigParser()
     config.read('config.ini')
@@ -44,16 +46,24 @@ def main():
     NUM_CHANNELS  = len(config["sensor_channel_mapping"].keys())
 
     # Setup socket for mission control
-    setup_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    setup_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    print("[I] Binding socket to " + str(config["general"]["HOST"])\
-        + ":" + str(config["general"]["PORT"]))
+    ip_port = str(config["general"]["HOST"]) + ":" + str(config["general"]["PORT"])
+    sock = None
+    if bool(config["general"]["websocket"]):
+        async def recv_fn(websocket: websockets.WebSocketServerProtocol, path: str):
+            async for message in websocket:
+                await websocket.send(message)
+            
+        setup_sock = await websockets.serve(recv_fn, config["general"]["HOST"], int(config["general"]["PORT"])).__aenter__()
+        print(f"[I] Connecting to websocket at {ip_port}")
+    else:
+        setup_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        setup_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        print("[I] Binding socket to " + ip_port)
+        setup_sock.bind((config["general"]["HOST"], int(config["general"]["PORT"])))
 
-    setup_sock.bind((config["general"]["HOST"], int(config["general"]["PORT"])))
-
-    # Wait for connection
-    sock = setup_socket(setup_sock)
-    setup_sock.settimeout(.5)
+        # Wait for connection
+        sock = setup_socket(setup_sock)
+        setup_sock.settimeout(.5)
 
 
     JSONData = {}
@@ -63,7 +73,7 @@ def main():
     JSONData['timestamp'] = ""
     JSONObj = json.dumps(JSONData)
     sendStr = JSONObj.encode('UTF-8')
-    sock.sendall(sendStr)
+    setup_sock.send(sendStr) if (sock is None) else sock.sendall(sendStr)
     print(sendStr)
 
     fd, f = open_file(config)
@@ -123,5 +133,5 @@ if __name__ == '__main__':
     \nData Acquisition and Remote Control for Eclipse Hybrid Engines\
     \nSoftware version 1.2.0\
     \n===============================================================")
-    main()
+    asyncio.run(main())
     print("[I] Stopping program")

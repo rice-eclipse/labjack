@@ -7,6 +7,8 @@ import random
 import os
 import re
 from socket import socket
+from websockets import WebSocketServerProtocol
+from typing import Union
 
 def should_close(close, close_lock):
     with close_lock:
@@ -18,20 +20,25 @@ def set_close(close, close_lock):
     with close_lock:
         close[0] = 1
 
-def setup_socket(setup_sock: socket):
-    print("[I] Waiting for connection request...")
-    setup_sock.listen()
-    sock = setup_sock.accept()[0]
-    print("Accepted connection from: ", setup_sock)
-    sock.settimeout(.5)
+async def setup_socket(setup_sock: Union[socket, WebSocketServerProtocol]):
+    sock = None
+    if isinstance(setup_sock, socket):
+        print("[I] Waiting for connection request...")
+        setup_sock.listen()
+        sock = setup_sock.accept()[0]
+        print("Accepted connection from: ", setup_sock)
+        sock.settimeout(.5)
     with open('lj_config.json', 'r') as file:
         config = json.load(file)
         message = {}
         message["type"] = "Config"
         message["config"] = config
-        sock.sendall(json.dumps(message).encode('UTF-8'))
+        if sock is not None:
+            sock.sendall(json.dumps(message).encode('UTF-8'))
+        else:
+            await setup_sock.send(json.dumps(message).encode('UTF-8'))
         print("Sent config message")
-    return sock
+    return setup_sock if (sock is None) else sock
 
 def voltages_to_values(config, sensor_vals):
     if sensor_vals.size == 0: return []
