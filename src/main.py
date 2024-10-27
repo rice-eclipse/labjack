@@ -46,35 +46,18 @@ async def main():
     NUM_CHANNELS  = len(config["sensor_channel_mapping"].keys())
 
     # Setup socket for mission control
-    ip_port = str(config["general"]["HOST"]) + ":" + str(config["general"]["PORT"])
-    sock = None
-    if bool(config["general"]["websocket"]):
-        async def recv_fn(websocket: websockets.WebSocketServerProtocol, path: str):
-            async for message in websocket:
-                await websocket.send(message)
-            
-        setup_sock = await websockets.serve(recv_fn, config["general"]["HOST"], int(config["general"]["PORT"])).__aenter__()
-        print(f"[I] Connecting to websocket at {ip_port}")
-    else:
-        setup_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        setup_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        print("[I] Binding socket to " + ip_port)
-        setup_sock.bind((config["general"]["HOST"], int(config["general"]["PORT"])))
+    host, port = config["general"]["HOST"], int(config["general"]["PORT"])
 
-        # Wait for connection
-        sock = setup_socket(setup_sock)
-        setup_sock.settimeout(.5)
+    if not bool(config["general"]["websocket"]):
+        print(f"[E] Non-websocket communication temporarily disabled. Do not use this version of the code if you don't want websockets!")
+        exit(1)
 
-
-    JSONData = {}
-    JSONData['sensors'] = [0,0,0,0]
-    JSONData['states'] = [0,0,0,0]
-    JSONData['console'] = "data"
-    JSONData['timestamp'] = ""
-    JSONObj = json.dumps(JSONData)
-    sendStr = JSONObj.encode('UTF-8')
-    setup_sock.send(sendStr) if (sock is None) else sock.sendall(sendStr)
-    print(sendStr)
+    # async def recv_fn(websocket: websockets.WebSocketServerProtocol, path: str):
+    #     async for message in websocket:
+    #         await websocket.send(message)
+        
+    # setup_sock = await websockets.serve(recv_fn, config["general"]["HOST"], int(config["general"]["PORT"])).__aenter__()
+    print(f"[I] Connecting to websocket at {host}:{port}")
 
     fd, f = open_file(config)
     try:
@@ -84,13 +67,20 @@ async def main():
         data_buf      = [[]] # special buffer for data sent to dashboard
         data_buf_lock = Lock()
 
-        dash_sender = DataSender(config, setup_sock, sock, close, close_lock, data_buf, data_buf_lock)
+        dash_sender = DataSender(config, close, close_lock, data_buf, data_buf_lock)
         dash_sender.start_thread()
 
-        cmd_listener = CmdListener(config, sock, close, close_lock, dash_sender)
+        cmd_listener = CmdListener(config, close, close_lock, dash_sender)
         cmd_listener.start_thread()
         dash_sender.cmd_listener = cmd_listener
 
+        async def handle(websocket: websockets.WebSocketServerProtocol, path: str):
+            await dash_sender.add_client(websocket)
+            await cmd_listener.handle(websocket, path)
+        
+        sock = await websockets.serve(handle, config["general"]["HOST"], config["general"]["PORT"]).__aenter__()
+        print("server started")
+        
         # Open connection to LabJack device
 
         data_logger = DataLogger(config, close, close_lock, data_buf, data_buf_lock, \
