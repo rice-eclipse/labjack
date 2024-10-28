@@ -38,7 +38,7 @@ class DataLogger:
         else:
             self.strikes = 0
 
-    def get_and_check_data_from_labjack(self):
+    async def get_and_check_data_from_labjack(self):
         try:
             max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
             new_rows = []
@@ -57,7 +57,7 @@ class DataLogger:
             send_msg_to_operator(self.dash_sender, "[E] Runtime exception during LabJack read " + str(e))
             return new_rows # Do not terminate program on read error
 
-    def write_data_to_sd(self, data):
+    async def write_data_to_sd(self, data):
         num_new_rows = int(len(data) / self.num_channels)
         start_time   = (self.total_samples_read - num_new_rows) / self.sample_rate
         end_time     = (self.total_samples_read - 1) / self.sample_rate
@@ -76,6 +76,6 @@ class DataLogger:
         # print("failed to acquire dash lock")
 
     # Effective "main"
-    def start_reading(self):
-        while not should_close(self.close, self.close_lock):
-            self.write_data_to_sd(self.get_and_check_data_from_labjack())
+    async def start_reading(self):
+        while True:
+            await self.write_data_to_sd(await self.get_and_check_data_from_labjack())

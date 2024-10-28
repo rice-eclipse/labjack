@@ -8,7 +8,8 @@ import os
 import re
 from socket import socket
 from websockets import WebSocketServerProtocol
-from typing import Union
+from typing import Union, List, Any
+import time
 
 def should_close(close, close_lock):
     with close_lock:
@@ -19,6 +20,64 @@ def should_close(close, close_lock):
 def set_close(close, close_lock):
     with close_lock:
         close[0] = 1
+
+def construct_message(buf_data: List[Any], states: List[int]):
+    {
+            "tcs": {
+                "type": "SensorValue",
+                "group_id": 0,
+                "readings": [
+                    {
+                        "sensor_id": 0,
+                        "reading": buf_data[6],
+                        "time": {
+                            "secs_since_epoch": int(time.time()),
+                            "nanos_since_epoch": 0
+                        }
+                    },
+                    {
+                        "sensor_id": 1,
+                        "reading": buf_data[7]
+                    }
+                ]
+            },
+            "pts": {
+                "type": "SensorValue",
+                "group_id": 1,
+                "readings": [
+                    {
+                        "sensor_id": 0,
+                        "reading": buf_data[10],
+                    },
+                    {
+                        "sensor_id": 1,
+                        "reading": buf_data[11]
+                    },
+                    {
+                        "sensor_id": 2,
+                        "reading": buf_data[12]
+                    },
+                    {
+                        "sensor_id": 3,
+                        "reading": buf_data[13]
+                    }
+                ]
+            },
+            "lcs": {
+                "type": "SensorValue",
+                "group_id": 2,
+                "readings": [
+                    {
+                        "sensor_id": 0,
+                        "reading": buf_data[0],
+                    },
+                ]
+            },
+            "driver": {
+                "type": "DriverValue",
+                "values": [bool(state) for state in states]
+            }
+        }
 
 async def setup_socket(setup_sock: Union[socket, WebSocketServerProtocol]):
     sock = None

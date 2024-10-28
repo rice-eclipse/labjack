@@ -34,7 +34,7 @@ from labjack import ljm
 import json
 import time
 from datetime import datetime
-import websockets
+from websockets.asyncio.server import serve, Server, ServerConnection
 import asyncio
 
 async def main():
@@ -45,46 +45,31 @@ async def main():
     READS_PER_SEC = int(config["general"]["reads_per_sec"])
     NUM_CHANNELS  = len(config["sensor_channel_mapping"].keys())
 
-    # Setup socket for mission control
     host, port = config["general"]["HOST"], int(config["general"]["PORT"])
 
     if not bool(config["general"]["websocket"]):
         print(f"[E] Non-websocket communication temporarily disabled. Do not use this version of the code if you don't want websockets!")
         exit(1)
 
-    # async def recv_fn(websocket: websockets.WebSocketServerProtocol, path: str):
-    #     async for message in websocket:
-    #         await websocket.send(message)
-        
-    # setup_sock = await websockets.serve(recv_fn, config["general"]["HOST"], int(config["general"]["PORT"])).__aenter__()
     print(f"[I] Connecting to websocket at {host}:{port}")
 
     fd, f = open_file(config)
     try:
-        # Start necessary workers
-        close         = [0] # global shutdown indicator
-        close_lock    = Lock()
-        data_buf      = [[]] # special buffer for data sent to dashboard
-        data_buf_lock = Lock()
 
-        dash_sender = DataSender(config, close, close_lock, data_buf, data_buf_lock)
-        dash_sender.start_thread()
+        dash_sender = DataSender(config)
+        await dash_sender.start_sending()
 
-        cmd_listener = CmdListener(config, close, close_lock, dash_sender)
-        cmd_listener.start_thread()
-        dash_sender.cmd_listener = cmd_listener
+        cmd_listener = CmdListener(config)
 
-        async def handle(websocket: websockets.WebSocketServerProtocol, path: str):
+        async def ws_handle(websocket: ServerConnection, path: str):
             await dash_sender.add_client(websocket)
-            await cmd_listener.handle(websocket, path)
+            await cmd_listener.recv_cmd(websocket, path)
         
-        sock = await websockets.serve(handle, config["general"]["HOST"], config["general"]["PORT"]).__aenter__()
-        print("server started")
+        server: Server = await serve(ws_handle, config["general"]["HOST"], config["general"]["PORT"])
         
         # Open connection to LabJack device
 
-        data_logger = DataLogger(config, close, close_lock, data_buf, data_buf_lock, \
-                                fd, dash_sender, SAMPLE_RATE, NUM_CHANNELS)
+        data_logger = DataLogger(config, fd, dash_sender, SAMPLE_RATE, NUM_CHANNELS)
         handle = ljm.openS("T7", "USB", "ANY")
 
         # Default all drivers (in case of improper shutdown)
@@ -94,28 +79,23 @@ async def main():
         dash_sender.handle  = handle
         cmd_listener.handle = handle
         data_logger.handle  = handle
-        data_logger.start_reading() # Using main thread
+        await data_logger.start_reading() # Using main thread
+
+        await server.serve_forever()
 
         # Wait for shutdown condition
     except (Exception, KeyboardInterrupt) as e:
         print("[E] Exception: " + str(e))
-        set_close(close, close_lock)
         try: clear_drivers(config, handle)
         except: pass
         ljm.eStreamStop(handle)
         ljm.close(handle)
-        sock.close()
-        dash_sender.join_thread()
-        cmd_listener.join_thread()
         raise e
 
     try: clear_drivers(config, handle)
     except: pass
     ljm.eStreamStop(handle)
     ljm.close(handle)
-    sock.close()
-    dash_sender.join_thread()
-    cmd_listener.join_thread()
     return
 
 if __name__ == '__main__':

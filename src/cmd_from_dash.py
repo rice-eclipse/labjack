@@ -4,35 +4,17 @@ import json
 import time
 from threading import Thread
 from labjack import ljm
+from websockets.asyncio.server import serve, Server, ServerConnection
 
 class CmdListener:
-    def __init__(self, config, sock: socket.socket, close, close_lock, dash_sender):
+    def __init__(self, config):
         self.config      = config
-        self.sock        = sock
-        self.close       = close
-        self.close_lock  = close_lock
-        self.handle      = None
-        self.dash_sender = dash_sender
-
         self.cmd_thread  = Thread(target = self.listen, args = ())
         self.ign_thread  = Thread(target = self.ignition_sequence, args = ())
 
-    def start_thread(self):
-        self.cmd_thread.start()
-
-    def join_thread(self):
-        self.cmd_thread.join()
-
-    def recv_cmd(self):
-        try:
-            return self.sock.recv(1024 * 128).decode('utf-8')
-        except socket.timeout:
-            time.sleep(.001)
-            return None
-        except socket.error:
-            # Shared socket; wait for DashSender to fix it (otherwise race condition arises)
-            time.sleep(.05)
-            return None
+    async def recv_cmd(self, websocket: ServerConnection, path: str):
+        async for cmd in websocket:
+            cmd = json.loads(cmd)
 
     def ignition_sequence(self):
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)

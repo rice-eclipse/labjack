@@ -1,177 +1,40 @@
 from labjack import ljm
-from common_util import should_close, setup_socket, get_valve_states, set_close
+from common_util import should_close, setup_socket, get_valve_states, set_close, construct_message
 import json
 import queue
 import socket
 import time
 from threading import Thread
+from typing import Any, List, Set
+import asyncio
+import websockets
 
 class DataSender:
-    def __init__(self, config, setup_sock, sock, close, close_lock, data_buf, data_buf_lock):
+    def __init__(self, config, data_buf):
         self.config        = config
-        self.setup_sock    = setup_sock
-        self.sock          = sock
-        self.close         = close
-        self.close_lock    = close_lock
-        self.data_buf      = data_buf
-        self.data_buf_lock = data_buf_lock
-        self.work_queue    = queue.Queue()
-        self.cmd_listener  = None
-        self.handle        = None
-        self.prev_send     = 0
-        self.disconnect_t  = None
-
-        self.thread        = Thread(target = self.start_sending, args = ())
-
-        self.work_queue.put(lambda: self.sample_data_to_operator())
+        self.delay         = int(config["general"]["dash_send_delay_ms"])
+        self.data_buf = data_buf
+        self.clients: Set[websockets.WebSocketServerProtocol] = set()
         print("created data sender")
-
         self.VALVE_RESET_SECS = int(self.config['general']['reset_valves_min']) * 60
 
-    def start_thread(self):
-        self.thread.start()
-
-    def join_thread(self):
-        self.thread.join()
-
-    """
-    Helper method for debugging
-    """
-    def msg_to_dash(self, message):
-        JSONData = {}
-        JSONData['sensors'] = []
-        JSONData['states'] = []
-        JSONData['console'] = message
-        JSONObj = json.dumps(JSONData)
-        sendStr = JSONObj.encode('UTF-8')
-        # try:
-        #     self.sock.sendall(sendStr)
-        # except socket.error:
-        #     print("[W] Failed to send console msg: " + message)
-
-    def add_work(self, task):
-        self.work_queue.put(task)
-
-    def sample_data_to_operator(self):
-        self.add_work(lambda: self.sample_data_to_operator())
-        now = time.time() * 1000
-        if (now < int(self.config["general"]["dash_send_delay_ms"]) + self.prev_send) or (self.handle == None):
-            time.sleep(.001)
-            return
-        self.prev_send = now
-        states = []
-        JSONData = {}
+    async def sample_data_to_operator(self):
         states = get_valve_states(self.handle)
-        # print(states)
-        # Access to dataBuf from main() thread
-        if self.data_buf_lock.acquire(timeout = .01):
-            JSONData['sensors'] = self.data_buf[0]
-            buf_data = self.data_buf[0]
-            if not JSONData['sensors']: 
-                self.data_buf_lock.release()
-                return
-            self.data_buf_lock.release()
-        else: 
-            print("Failed to obtain databuf lock")
-            return
-        
-        print("hi")
+        buf_data = self.data_buf[0]
+        message = construct_message(buf_data, states)
+        sendstr = json.dumps(message).encode('UTF-8')
+        for client in self.clients:
+            client.send(sendstr)
+        print(f"Sent: {sendstr[:40]}")
 
-        message0 = {}
-        message0["type"] = "SensorValue"
-        message0["group_id"] = 0
-        message0["readings"] = []
+    async def add_client(self, client: websockets.WebSocketServerProtocol):
+        self.clients.add(client)
 
-        # thermo 1
-        reading = {}
-        reading["sensor_id"] = 0
-        reading["reading"] = buf_data[6]
-        reading["time"] = {}
-        reading["time"]["secs_since_epoch"] = int(time.time())
-        reading["time"]["nanos_since_epoch"] = 0
-        message0["readings"] += [dict(reading)]
+    async def remove_client(self, client: websockets.WebSocketServerProtocol):
+        self.clients.remove(client)
 
-        # thermo 2
-        reading["sensor_id"] = 1
-        reading["reading"] = buf_data[7]
-        message0["readings"] += [dict(reading)]
+    async def start_sending(self):
+        while True:
+            await self.sample_data_to_operator()
+            asyncio.sleep(self.delay)
 
-        message1 = {}
-        message1["type"] = "SensorValue"
-        message1["group_id"] = 1
-        message1["readings"] = []
-
-        # pt 1
-        reading["sensor_id"] = 0
-        reading["reading"] = buf_data[10]
-        message1["readings"] += [dict(reading)]
-
-        # pt 2
-        reading["sensor_id"] = 1
-        reading["reading"] = buf_data[11]
-        message1["readings"] += [dict(reading)]
-
-        # pt 3
-        reading["sensor_id"] = 2
-        reading["reading"] = buf_data[12]
-        message1["readings"] += [dict(reading)]
-
-        # pt 4
-        reading["sensor_id"] = 3
-        reading["reading"] = buf_data[13]
-        message1["readings"] += [dict(reading)]
-
-        message2 = {}
-        message2["type"] = "SensorValue"
-        message2["group_id"] = 2
-        message2["readings"] = []
-
-        # lc 1 (small)
-        reading["sensor_id"] = 0
-        reading["reading"] = buf_data[0]
-        message2["readings"] += [dict(reading)]
-
-        statesmsg = {}
-        statesmsg["type"] = "DriverValue"
-        tfstates = []
-        for i in range(len(states)):
-            if states[i] == 0: tfstates.append(False)
-            elif states[i] == 1: tfstates.append(True)
-        statesmsg["values"] = tfstates
-        sendStr3 = json.dumps(statesmsg).encode('UTF-8')
-        full_msg = {"tcs": message0, "pts": message1, "lcs": message2, "driver": statesmsg}
-        sendstr = json.dumps(full_msg).encode('UTF-8')
-        try:
-            #print(sendstr)
-            self.sock.sendall(sendstr)
-            print(f"Sent: {sendstr[:40]}")
-            self.disconnect_t = None
-
-        except Exception as e:
-            print("[W] Connection issue! Waiting for reconnect before resend: " + str(e))
-
-            if self.disconnect_t is None:
-                self.disconnect_t = time.time()
-            else:
-                secs_remaining = self.VALVE_RESET_SECS - (time.time() - self.disconnect_t)
-                if secs_remaining < 0:
-                    set_close(self.close, self.close_lock)
-                else:
-                    print(f"[W] Valve states will automatically reset in: {'{:02d}'.format(int(secs_remaining // 60))}:{'{:02d}'.format(int(secs_remaining % 60))}")
-
-            try:
-                self.sock = setup_socket(self.setup_sock)
-                self.cmd_listener.sock = self.sock
-            except socket.timeout:
-                pass
-
-    def start_sending(self):
-        try:
-            while not should_close(self.close, self.close_lock):
-                task = self.work_queue.get()
-                if task is None:
-                    continue
-                task()
-        except Exception as e:
-            set_close(self.close, self.close_lock)
-            raise e
