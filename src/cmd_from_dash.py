@@ -5,6 +5,7 @@ from configparser import ConfigParser
 from labjack_interface import LabjackInterface
 from typing import Dict
 import logging
+from websockets.exceptions import ConnectionClosedError
 
 logger = logging.getLogger(__name__)
 
@@ -16,17 +17,22 @@ class CmdListener:
     
     async def __aenter__(self):
         logger.debug("Listening...")
+        return self
     
     async def __aexit__(self, exc_type, exc_value, traceback):
         logger.debug("Exiting command listener context...")
 
-    async def recv_cmd(self, websocket: ServerConnection, path: str):
-        async for cmd in websocket:
-            try:
-                cmd = json.loads(cmd)
-            except:
-                await self.data_sender.send_message("Invalid command syntax received!")
-            await self.process_command(cmd)
+    async def recv_cmd(self, websocket: ServerConnection):
+        logger.info(websocket)
+        try:
+            async for cmd in websocket:
+                try:
+                    cmd = json.loads(cmd)
+                except:
+                    await self.data_sender.send_message("Invalid command syntax received!")
+                await self.process_command(cmd)
+        except ConnectionClosedError as e:
+            logger.error(f"Connection closed unexpectedly: {e}\n{e.__traceback__}")
 
     async def process_command(self, cmd: Dict):
         logger.debug("Received command: " + str(cmd))

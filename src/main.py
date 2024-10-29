@@ -59,9 +59,10 @@ class ServiceDirector():
         async with DataSender(self.config, self.data_buf, self.valve_state_buf) as data_sender:
             async with LabjackInterface(self.config, data_sender, self.data_buf, self.valve_state_buf) as ljm_int:
                 async with CmdListener(self.config, data_sender, ljm_int) as cmd_listener:
-                    async def ws_handle(websocket: ServerConnection, path: str):
+                    async def ws_handle(websocket: ServerConnection):
+                        logger.info(f"Incoming connection from {websocket.id}")
                         await data_sender.add_client(websocket)
-                        await cmd_listener.recv_cmd(websocket, path)
+                        await cmd_listener.recv_cmd(websocket)
                     
                     loop = asyncio.get_event_loop()
                     stop = loop.create_future()
@@ -69,8 +70,9 @@ class ServiceDirector():
                     async with serve(
                         ws_handle, 
                         self.config["general"]["HOST"], 
-                        self.config["general"]["PORT"]
+                        int(self.config["general"]["PORT"])
                     ):
+                        logger.info("Starting websocket server...")
                         await stop
         
 def main():

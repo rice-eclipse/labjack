@@ -2,6 +2,7 @@ import json
 from typing import List, Dict
 import asyncio
 from websockets.asyncio.server import ServerConnection, broadcast
+import websockets
 from configparser import ConfigParser
 import time
 import logging
@@ -29,12 +30,19 @@ class DataSender:
 
     async def sample_data_to_operator(self):
         message = self._construct_message()
-        sendstr = json.dumps(message).encode('UTF-8')
+        message = json.dumps(message)
         for client in self.clients.values():
-            client.send(sendstr)
-        logger.debug(f"Sent: {sendstr[:40]}")
+            logger.info(f"Sending data to {client.id}")
+            try:
+                await client.send(message)
+            except websockets.ConnectionClosed as e:
+                print(f"Connection closed: {e.code} - {e.reason}")
+            except Exception as e:
+                logger.error(e)
+        logger.debug(f"Sent: {str(message)[:40]}")
 
     async def add_client(self, client: ServerConnection):
+        logger.info(f"Added client {client.id}")
         self.clients[client.id] = client
 
     async def remove_client(self, client: ServerConnection):

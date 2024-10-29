@@ -49,7 +49,6 @@ class LabjackInterface():
             await asyncio.sleep(0.01)
             
     async def sample_data(self):
-        logger.debug("Sampling data...")
         max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
         new_rows = []
         for i in range(max_reads):
@@ -59,15 +58,13 @@ class LabjackInterface():
             # print(samples_in_ljm_buff)
             # self.check_for_emergency(new_rows)
             self.total_samples_read += 1
-            if self.total_samples_read % 1000 == 0: print("[I] " + str(self.total_samples_read) + " samples obtained")
+            if self.total_samples_read % 1000 == 0: logger.info(f"{self.total_samples_read} samples obtained")
             if samples_in_ljm_buff == 0:
                 break
         await self.update_valve_states()
-        logger.debug(f"Data sampled: {new_rows}")
         return new_rows
 
     def _voltages_to_values(self, sensor_vals):
-        logger.info("calling voltages to values")
         if sensor_vals.size == 0: return []
         n_sensors = sensor_vals.copy()
         sensor_keys = list(self.config['sensor_channel_mapping'].keys())
@@ -108,16 +105,12 @@ class LabjackInterface():
         timestamps   = np.round(np.linspace(start_time, end_time, num_new_rows), 5)
 
         dataR        = np.asarray(data).reshape(num_new_rows, self.num_channels)
-        logger.info(dataR.shape)
-        logger.info(timestamps.shape)
         try:
             write_data   = np.column_stack((np.transpose(timestamps), self._voltages_to_values(dataR)))
         except Exception as e:
             logger.error(e)
-        logger.info(f"{write_data=}")
 
         self.data_buf[0] = write_data[-1].tolist()[-self.num_channels:]
-        logger.info(write_data)
     
     def _clear_drivers(self):
         for driver in self.config["driver_mapping"]:
