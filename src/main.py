@@ -1,7 +1,7 @@
 """
 Data Acquisition and Remote Control for Eclipse Hybrid Engines
-Spencer Darwall, Avionics & Software Lead '22-23
 Ian Rundle, President '23-24
+Spencer Darwall, Avionics & Software Lead '22-23
 
 Code interfaces with LabJack device hardware via LJM Library. The LabJack
 has input pins for each sensor and output pins for each driver- this script logs
@@ -24,84 +24,49 @@ Run-on-startup config at: /home/eclipsepi/.config/systemd/user/labjack.service
 """
 
 from data_to_dash import DataSender
-from logging_and_eshutdown import DataLogger
 from cmd_from_dash import CmdListener
-from common_util import setup_socket, open_file, send_msg_to_operator, clear_drivers, stream_setup, set_close
-import configparser
-import socket
-from threading import Lock
-from labjack import ljm
-import json
-import time
-from datetime import datetime
-from websockets.asyncio.server import serve, Server, ServerConnection
+from configparser import ConfigParser
+from websockets.asyncio.server import ServerConnection, serve
 import asyncio
+import signal
+from labjack_interface import LabjackInterface
 
-async def main():
-    # Get config info from peer file
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    SAMPLE_RATE   = int(config["general"]["sample_rate"])
-    READS_PER_SEC = int(config["general"]["reads_per_sec"])
-    NUM_CHANNELS  = len(config["sensor_channel_mapping"].keys())
-
-    host, port = config["general"]["HOST"], int(config["general"]["PORT"])
-
-    if not bool(config["general"]["websocket"]):
-        print(f"[E] Non-websocket communication temporarily disabled. Do not use this version of the code if you don't want websockets!")
-        exit(1)
-
-    print(f"[I] Connecting to websocket at {host}:{port}")
-
-    fd, f = open_file(config)
-    try:
-
-        dash_sender = DataSender(config)
-        await dash_sender.start_sending()
-
-        cmd_listener = CmdListener(config)
-
-        async def ws_handle(websocket: ServerConnection, path: str):
-            await dash_sender.add_client(websocket)
-            await cmd_listener.recv_cmd(websocket, path)
+class ServiceDirector():
+    def __init__(self, config_file: str):
+        self.conf = ConfigParser()
+        self.conf.read(config_file)
+        self._validate_config()
+        self.data_buf = [None]
+        self.valve_state_buf = [None]
         
-        server: Server = await serve(ws_handle, config["general"]["HOST"], config["general"]["PORT"])
+    def _validate_config():
+        pass
+    
+    async def run(self):
+        async with DataSender(self.config, self.data_buf, self.valve_state_buf) as data_sender:
+            async with LabjackInterface(self.config, data_sender, self.data_buf, self.valve_state_buf) as ljm_int:
+                async with CmdListener(self.config, data_sender, ljm_int) as cmd_listener:
+                    async def ws_handle(self, websocket: ServerConnection, path: str):
+                        await data_sender.add_client(websocket)
+                        await cmd_listener.recv_cmd(websocket, path)
+                    
+                    loop = asyncio.get_event_loop()
+                    stop = loop.create_future()
+                    loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
+                    async with serve(
+                        ws_handle, 
+                        self.config["general"]["HOST"], 
+                        self.config["general"]["PORT"]
+                    ):
+                        await stop
         
-        # Open connection to LabJack device
-
-        data_logger = DataLogger(config, fd, dash_sender, SAMPLE_RATE, NUM_CHANNELS)
-        handle = ljm.openS("T7", "USB", "ANY")
-
-        # Default all drivers (in case of improper shutdown)
-        clear_drivers(config, handle)
-        stream_setup(config, handle, NUM_CHANNELS, SAMPLE_RATE, READS_PER_SEC)
-
-        dash_sender.handle  = handle
-        cmd_listener.handle = handle
-        data_logger.handle  = handle
-        await data_logger.start_reading() # Using main thread
-
-        await server.serve_forever()
-
-        # Wait for shutdown condition
-    except (Exception, KeyboardInterrupt) as e:
-        print("[E] Exception: " + str(e))
-        try: clear_drivers(config, handle)
-        except: pass
-        ljm.eStreamStop(handle)
-        ljm.close(handle)
-        raise e
-
-    try: clear_drivers(config, handle)
-    except: pass
-    ljm.eStreamStop(handle)
-    ljm.close(handle)
-    return
+def main():
+    asyncio.run(ServiceDirector().run())
 
 if __name__ == '__main__':
     print("\n===============================================================\
     \nData Acquisition and Remote Control for Eclipse Hybrid Engines\
     \nSoftware version 1.2.0\
     \n===============================================================")
-    asyncio.run(main())
+    main()
     print("[I] Stopping program")

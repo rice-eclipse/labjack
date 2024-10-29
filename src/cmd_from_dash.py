@@ -1,57 +1,38 @@
-from common_util import should_close, set_close, send_msg_to_operator
-import socket
 import json
-import time
-from threading import Thread
-from labjack import ljm
-from websockets.asyncio.server import serve, Server, ServerConnection
+from websockets.asyncio.server import ServerConnection
+from data_to_dash import DataSender
+from configparser import ConfigParser
+from labjack_interface import LabjackInterface
+from typing import Dict
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CmdListener:
-    def __init__(self, config):
-        self.config      = config
-        self.cmd_thread  = Thread(target = self.listen, args = ())
-        self.ign_thread  = Thread(target = self.ignition_sequence, args = ())
+    def __init__(self, config: ConfigParser, data_sender: DataSender, ljm_int: LabjackInterface):
+        self.config = config
+        self.data_sender = data_sender
+        self.ljm_int = ljm_int
 
     async def recv_cmd(self, websocket: ServerConnection, path: str):
         async for cmd in websocket:
-            cmd = json.loads(cmd)
+            try:
+                cmd = json.loads(cmd)
+            except:
+                await self.data_sender.send("Invalid command syntax received!")
+            await self.process_command(cmd)
 
-    def ignition_sequence(self):
-        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
-        send_msg_to_operator(self.dash_sender, "[I] Igniting...")
-        time.sleep(10)
-        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
-        self.ign_thread  = Thread(target = self.ignition_sequence, args = ())
-
-    def start_thread(self):
-        self.cmd_thread.start()
-
-    def listen(self):
-        try:
-            while not should_close(self.close, self.close_lock):
-                cmd = self.recv_cmd()
-                if (cmd is not None) and (cmd != ""):
-                    try:
-                        decode_cmd = json.loads(cmd)
-                    except:
-                        print(type(cmd))
-                        send_msg_to_operator(self.dash_sender, "[W] Invalid command syntax received!")
-                        continue
-                    print("[I] Received command: " + str(cmd))
-                    if "type" not in decode_cmd: continue
-                    if decode_cmd["type"] == "close":
-                        print("[I] No longer listening for commands")
-                        set_close(self.close, self.close_lock)
-                    elif self.handle == None:
-                        send_msg_to_operator(self.dash_sender, "[E] Dropping command; no active LabJack handle")
-                    elif decode_cmd["type"] == "Actuate" and (("driver_id") in decode_cmd) and (("value") in decode_cmd):
-                        print("[I] Setting driver " + self.config["driver_mapping"][str(decode_cmd["driver_id"])] + " to " + str(decode_cmd["value"]))
-                        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(decode_cmd["driver_id"])], decode_cmd["value"])
-                    elif decode_cmd["type"] == "Ignition":
-                        if not self.ign_thread.is_alive(): self.ign_thread.start()
-                    else:
-                        send_msg_to_operator(self.dash_sender, "[W] Unknown command: " + decode_cmd["type"])
-                else: time.sleep(.001)
-        except Exception as e:
-            set_close(self.close, self.close_lock)
-            raise e
+    async def process_command(self, cmd: Dict):
+        logger.debug("Received command: " + str(cmd))
+        if "type" not in cmd:
+            return
+        if cmd["type"] == "close":
+            logger.info("No longer listening for commands")
+            exit(0)
+        elif cmd["type"] == "Actuate" and (("driver_id") in cmd) and (("value") in cmd):
+            logger.info("Setting driver " + self.config["driver_mapping"][str(cmd["driver_id"])] + " to " + str(cmd["value"]))
+            await self.ljm_int.actuate(self.config["driver_mapping"][str(cmd["driver_id"])], cmd["value"])
+        elif cmd["type"] == "Ignition":
+            await self.ljm_int.ignition_sequence()
+        else:
+            await self.data_sender.send(self.dash_sender, "[W] Unknown command type: " + cmd["type"])
