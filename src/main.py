@@ -61,7 +61,7 @@ class ServiceDirector():
                         await stop
         
 def main():
-    asyncio.run(ServiceDirector().run())
+    asyncio.run(ServiceDirector("config.ini").run())
 
 if __name__ == '__main__':
     print("\n===============================================================\

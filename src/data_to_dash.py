@@ -1,5 +1,5 @@
 import json
-from typing import List, Dict, Any
+from typing import List, Dict
 import asyncio
 from websockets.asyncio.server import ServerConnection
 from configparser import ConfigParser
