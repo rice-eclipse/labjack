@@ -13,13 +13,19 @@ class CmdListener:
         self.config = config
         self.data_sender = data_sender
         self.ljm_int = ljm_int
+    
+    async def __aenter__(self):
+        logger.debug("Listening...")
+    
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        logger.debug("Exiting command listener context...")
 
     async def recv_cmd(self, websocket: ServerConnection, path: str):
         async for cmd in websocket:
             try:
                 cmd = json.loads(cmd)
             except:
-                await self.data_sender.send("Invalid command syntax received!")
+                await self.data_sender.send_message("Invalid command syntax received!")
             await self.process_command(cmd)
 
     async def process_command(self, cmd: Dict):
@@ -35,4 +41,4 @@ class CmdListener:
         elif cmd["type"] == "Ignition":
             await self.ljm_int.ignition_sequence()
         else:
-            await self.data_sender.send(self.dash_sender, "[W] Unknown command type: " + cmd["type"])
+            await self.data_sender.send_message(self.dash_sender, "[W] Unknown command type: " + cmd["type"])

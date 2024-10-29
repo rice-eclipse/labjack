@@ -2,6 +2,9 @@ from unittest.mock import patch
 import mock_ljm
 from labjack import ljm
 import configparser
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Mock behavior for ConfigParser's read method
 def mock_read(self, filenames, encoding=None):
@@ -11,5 +14,6 @@ def mock_read(self, filenames, encoding=None):
 # Mock ljm when running on a non-LabJack machine
 with patch('labjack.ljm', new=mock_ljm.SimLJM()):
     with patch.object(configparser.ConfigParser, 'read', mock_read):
+        logger.info("Simulating...")
         import main
         main.main()

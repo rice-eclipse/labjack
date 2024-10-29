@@ -30,23 +30,36 @@ from websockets.asyncio.server import ServerConnection, serve
 import asyncio
 import signal
 from labjack_interface import LabjackInterface
+import logging
+import sys
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG, 
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("log.log")
+    ]
+)
 
 class ServiceDirector():
     def __init__(self, config_file: str):
-        self.conf = ConfigParser()
-        self.conf.read(config_file)
+        self.config = ConfigParser()
+        self.config.read(config_file)
         self._validate_config()
         self.data_buf = [None]
         self.valve_state_buf = [None]
+        logger.info("Hi")
         
-    def _validate_config():
+    def _validate_config(self):
         pass
     
     async def run(self):
+        logger.info("Running...")
         async with DataSender(self.config, self.data_buf, self.valve_state_buf) as data_sender:
             async with LabjackInterface(self.config, data_sender, self.data_buf, self.valve_state_buf) as ljm_int:
                 async with CmdListener(self.config, data_sender, ljm_int) as cmd_listener:
-                    async def ws_handle(self, websocket: ServerConnection, path: str):
+                    async def ws_handle(websocket: ServerConnection, path: str):
                         await data_sender.add_client(websocket)
                         await cmd_listener.recv_cmd(websocket, path)
                     
@@ -63,10 +76,9 @@ class ServiceDirector():
 def main():
     asyncio.run(ServiceDirector("config.ini").run())
 
-if __name__ == '__main__':
-    print("\n===============================================================\
-    \nData Acquisition and Remote Control for Eclipse Hybrid Engines\
-    \nSoftware version 1.2.0\
-    \n===============================================================")
-    main()
-    print("[I] Stopping program")
+print("\n===============================================================\
+\nData Acquisition and Remote Control for Eclipse Hybrid Engines\
+\nSoftware version 1.2.0\
+\n===============================================================")
+main()
+print("[I] Stopping program")

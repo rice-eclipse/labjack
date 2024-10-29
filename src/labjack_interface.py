@@ -9,9 +9,12 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 class LabjackInterface():
-    def __init__(self, config: ConfigParser, data_sender: DataSender, data_buf: List[int], valve_state_buf = List[int]):
+    def __init__(self, config: ConfigParser, data_sender: DataSender, data_buf: List[List[int]], valve_state_buf = List[int]):
         self.handle = ljm.openS("T7", "USB", "ANY")
         self.config = config
+        self.sample_rate = int(self.config["general"]["sample_rate"])
+        self.reads_per_sec = int(self.config["general"]["reads_per_sec"])
+        self.num_channels = len(self.config["sensor_channel_mapping"].keys())
         self.data_sender = data_sender
         self._clear_drivers()
         self._stream_setup()
@@ -20,6 +23,7 @@ class LabjackInterface():
         self.data_buf = data_buf
         self.valve_state_buf = valve_state_buf
         self.e_index = self._get_emergency_sensor_index() 
+        self.total_samples_read = 0
         # TODO: Why was the emergency check commented out earlier?
         
     async def __aenter__(self):
@@ -27,8 +31,10 @@ class LabjackInterface():
         self.task = asyncio.create_task(self.log_readings())
         return self
     
-    async def __aexit__(self):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         self.running = False
+        if exc_type != None:
+            logger.error(f"Labjack interface closed, exception:\n{exc_value}\n\n{traceback}")
         await self.task
         try:
             self._clear_drivers()
@@ -42,33 +48,29 @@ class LabjackInterface():
             await self.write_data_to_sd(await self.sample_data())
             await asyncio.sleep(0.01)
             
-    async def _send_msg_to_operator(self, dash_sender, msg):
-        self.data_sender.send_message(lambda: dash_sender.msg_to_dash(msg))
-            
     async def sample_data(self):
-        try:
-            max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
-            new_rows = []
-            for i in range(max_reads):
-                read_val = ljm.eStreamRead(self.handle)
-                new_rows += list(read_val[0])
-                samples_in_ljm_buff = read_val[2]
-                # print(samples_in_ljm_buff)
-                # self.check_for_emergency(new_rows)
-                self.total_samples_read += 1
-                if self.total_samples_read % 1000 == 0: print("[I] " + str(self.total_samples_read) + " samples obtained")
-                if samples_in_ljm_buff == 0:
-                    break
-            await self.update_valve_states()
-            return new_rows
-        except Exception as e:
-            await self._send_msg_to_operator(self.dash_sender, "[E] Runtime exception during LabJack read " + str(e))
-            return new_rows # Do not terminate program on read error
-    
-    def _voltages_to_values(config, sensor_vals):
+        logger.debug("Sampling data...")
+        max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
+        new_rows = []
+        for i in range(max_reads):
+            read_val = ljm.eStreamRead(self.handle)
+            new_rows += list(read_val[0])
+            samples_in_ljm_buff = read_val[2]
+            # print(samples_in_ljm_buff)
+            # self.check_for_emergency(new_rows)
+            self.total_samples_read += 1
+            if self.total_samples_read % 1000 == 0: print("[I] " + str(self.total_samples_read) + " samples obtained")
+            if samples_in_ljm_buff == 0:
+                break
+        await self.update_valve_states()
+        logger.debug(f"Data sampled: {new_rows}")
+        return new_rows
+
+    def _voltages_to_values(self, sensor_vals):
+        logger.info("calling voltages to values")
         if sensor_vals.size == 0: return []
         n_sensors = sensor_vals.copy()
-        sensor_keys = list(config['sensor_channel_mapping'].keys())
+        sensor_keys = list(self.config['sensor_channel_mapping'].keys())
         for i, chan in enumerate(sensor_keys):
             key_prefix = chan[:6]
             is_two_dim = len(n_sensors.shape) == 2
@@ -94,8 +96,9 @@ class LabjackInterface():
                 scale_key = pt_num + '_scale'
 
             if offset_key and scale_key:
-                n_sensors[sensor_index] = np.round((sensor_vals[sensor_index] - float(config['conversion'][offset_key])) /\
-                                                float(config['conversion'][scale_key]), 5)
+                n_sensors[sensor_index] = np.round((sensor_vals[sensor_index] - float(self.config['conversion'][offset_key])) /\
+                                                float(self.config['conversion'][scale_key]), 5)
+    
         return n_sensors.tolist()
     
     async def write_data_to_sd(self, data):
@@ -105,9 +108,14 @@ class LabjackInterface():
         timestamps   = np.round(np.linspace(start_time, end_time, num_new_rows), 5)
 
         dataR        = np.asarray(data).reshape(num_new_rows, self.num_channels)
-        write_data   = np.column_stack((np.transpose(timestamps), self._voltages_to_values(self.config, dataR)))
+        logger.info(dataR.shape)
+        logger.info(timestamps.shape)
+        try:
+            write_data   = np.column_stack((np.transpose(timestamps), self._voltages_to_values(dataR)))
+        except Exception as e:
+            logger.error(e)
+        logger.info(f"{write_data=}")
 
-        self.share_to_dash(write_data[-1].tolist())
         self.data_buf[0] = write_data[-1].tolist()[-self.num_channels:]
         logger.info(write_data)
     
@@ -116,13 +124,10 @@ class LabjackInterface():
             ljm.eWriteName(self.handle, self.config["driver_mapping"][driver], 0)
     
     def _stream_setup(self):
-        sample_rate = int(self.config["general"]["sample_rate"])
-        reads_per_sec = int(self.config["general"]["reads_per_sec"])
-        num_channels = len(self.config["sensor_channel_mapping"].keys())
         
         aScanListNames = list(self.config["sensor_channel_mapping"].values())
-        aScanList = ljm.namesToAddresses(num_channels, aScanListNames)[0]
-        scansPerRead = sample_rate // reads_per_sec
+        aScanList = ljm.namesToAddresses(self.num_channels, aScanListNames)[0]
+        scansPerRead = self.sample_rate // self.reads_per_sec
 
         reg_names = ["STREAM_TRIGGER_INDEX", "STREAM_CLOCK_SOURCE", "STREAM_RESOLUTION_INDEX", "STREAM_SETTLING_US"]
         reg_values = [0, 0, 0, 0]
@@ -138,13 +143,13 @@ class LabjackInterface():
             """
         numFrames = len(reg_names)
         ljm.eWriteNames(self.handle, numFrames, reg_names, reg_values)
-        if (int(ljm.eStreamStart(self.handle, scansPerRead, num_channels, aScanList, sample_rate))\
-            != sample_rate):
+        if (int(ljm.eStreamStart(self.handle, scansPerRead, self.num_channels, aScanList, self.sample_rate))\
+            != self.sample_rate):
             raise Exception("Failed to configure LabJack data stream!")
         
     async def ignition_sequence(self):
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
-        self.data_sender.send(self.dash_sender, "[I] Igniting...")
+        await self.data_sender.send_message(self.dash_sender, "[I] Igniting...")
         await asyncio.sleep(10)
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
 
@@ -159,7 +164,7 @@ class LabjackInterface():
             if (self.strikes >= 3):
                 # 3 bad values in a row -> emergency shutdown
                 ljm.eWriteName(self.handle, self.config["proxima_emergency_shutoff"]["shutdown_valve"], 0)
-                self.data_sender.send("Emergency shutdown executed!")
+                await self.data_sender.send("Emergency shutdown executed!")
         else:
             self.strikes = 0
             

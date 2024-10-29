@@ -1,9 +1,12 @@
 import json
 from typing import List, Dict
 import asyncio
-from websockets.asyncio.server import ServerConnection
+from websockets.asyncio.server import ServerConnection, broadcast
 from configparser import ConfigParser
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DataSender:
     def __init__(self, config: ConfigParser, data_buf: List[List[int]], valve_state_buf: List[List[int]]):
@@ -20,7 +23,7 @@ class DataSender:
         self.task = asyncio.create_task(self.start_sending())
         return self
 
-    async def __aexit__(self):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         self.running = False
         await self.task
 
@@ -29,7 +32,7 @@ class DataSender:
         sendstr = json.dumps(message).encode('UTF-8')
         for client in self.clients.values():
             client.send(sendstr)
-        print(f"Sent: {sendstr[:40]}")
+        logger.debug(f"Sent: {sendstr[:40]}")
 
     async def add_client(self, client: ServerConnection):
         self.clients[client.id] = client
@@ -39,10 +42,23 @@ class DataSender:
 
     async def start_sending(self):
         while self.running:
-            await self.sample_data_to_operator()
-            asyncio.sleep(self.delay)
+            if self.data_buf[0] and self.valve_state_buf[0]:
+                await self.sample_data_to_operator()
+            else:
+                logger.debug("Nothing in buffer")
+            await asyncio.sleep(self.delay / 1000)
 
-    async def _construct_message(self):
+    async def send_message(self, message: str):
+        data = {
+            "sensors": [],
+            "states": [],
+            "console": message
+        }
+        payload = json.dumps(data).encode("UTF-8")
+        logger.info(f"Sending message: '{message}'")
+        broadcast(self.clients.values(), payload)
+
+    def _construct_message(self):
         buf_data = self.data_buf[0]
         states = self.valve_state_buf[0]
         return {
