@@ -12,7 +12,7 @@ class SimLJM:
     
     def eStreamRead(self, handle):
         time.sleep(random.randint(3,10) / 50000)
-        return ([random.randint(0, 10) for _ in range(14)], 0, 14)
+        return ([random.randint(0, 10) / 1000 for _ in range(14)], 0, 14)
     
     def eStreamStart(self, handle, scans, numAddresses, a, sample_rate):
         return sample_rate
