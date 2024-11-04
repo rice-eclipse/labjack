@@ -5,6 +5,8 @@ import asyncio
 from data_to_dash import DataSender
 import numpy as np
 from typing import List
+import csv
+import datetime as dt
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +26,21 @@ class LabjackInterface():
         self.valve_state_buf = valve_state_buf
         self.e_index = self._get_emergency_sensor_index() 
         self.total_samples_read = 0
+        self.csv_writer = None
+        self.csv_fd = None
         # TODO: Why was the emergency check commented out earlier?
         
     async def __aenter__(self):
         self.running = True
+        filename = f"../data/{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.csv"
+        self.csv_fd = open(filename, "x")
+        self.csv_writer = csv.writer(self.csv_fd)
+        logger.info(f"Created new file: {filename}")
+        cols = ["Time (s)"]
+        for sensors in self.config["sensor_channel_mapping"]:
+            cols.append(sensors)
+        self.csv_writer.writerow(cols)
         self.task = asyncio.create_task(self.log_readings())
-        return self
     
     async def __aexit__(self, exc_type, exc_value, traceback):
         self.running = False
@@ -42,11 +53,12 @@ class LabjackInterface():
             pass
         ljm.eStreamStop(self.handle)
         ljm.close(self.handle)
+        self.csv_fd.close()
         
     async def log_readings(self):
         while self.running:
             await self.write_data_to_sd(await self.sample_data())
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(30 / self.sample_rate)
             
     async def sample_data(self):
         max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
@@ -111,6 +123,8 @@ class LabjackInterface():
             logger.error(e)
 
         self.data_buf[0] = write_data[-1].tolist()[-self.num_channels:]
+        self.csv_writer.writerows(write_data)
+        logger.info(write_data[:3,:3])
     
     def _clear_drivers(self):
         for driver in self.config["driver_mapping"]:
