@@ -8,7 +8,7 @@ class SimLJM:
         self.data = [random.randint(0, 10) for _ in range(14)]
     
     def eReadName(self, handle, name):
-        return 0.0
+        return random.randint(0, 32)
     
     def eStreamRead(self, handle):
         time.sleep(random.randint(3,10) / 50000)

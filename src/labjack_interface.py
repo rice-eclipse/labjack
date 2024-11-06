@@ -142,8 +142,9 @@ class LabjackInterface():
         
     async def ignition_sequence(self):
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
-        await self.data_sender.send_message(self.dash_sender, "[I] Igniting...")
-        await asyncio.sleep(10)
+        for countdown in range(10, -1, -1):
+            await self.data_sender.send_message(f"Ignition sequence in {countdown}...")
+            await asyncio.sleep(1)
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
 
     async def actuate(self, driver, value):

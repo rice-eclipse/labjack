@@ -43,8 +43,9 @@ class CmdListener:
             exit(0)
         elif cmd["type"] == "Actuate" and (("driver_id") in cmd) and (("value") in cmd):
             logger.info("Setting driver " + self.config["driver_mapping"][str(cmd["driver_id"])] + " to " + str(cmd["value"]))
+            await self.data_sender.send_message(f"Actuating driver id {cmd['driver_id']} - {cmd['value']}")
             await self.ljm_int.actuate(self.config["driver_mapping"][str(cmd["driver_id"])], cmd["value"])
         elif cmd["type"] == "Ignition":
             await self.ljm_int.ignition_sequence()
         else:
-            await self.data_sender.send_message(self.dash_sender, "[W] Unknown command type: " + cmd["type"])
+            await self.data_sender.send_message("[W] Unknown command type: " + cmd["type"])

@@ -37,6 +37,7 @@ class DataSender:
                 await client.send(message)
             except websockets.ConnectionClosed as e:
                 print(f"Connection closed: {e.code} - {e.reason}")
+                await self.remove_client(client)
             except Exception as e:
                 logger.error(e)
         logger.debug(f"Sent: {str(message)[:40]}")
@@ -62,7 +63,7 @@ class DataSender:
             "states": [],
             "console": message
         }
-        payload = json.dumps(data).encode("UTF-8")
+        payload = json.dumps(data)
         logger.info(f"Sending message: '{message}'")
         broadcast(self.clients.values(), payload)
 
