@@ -58,9 +58,12 @@ class LabjackInterface():
         self.csv_fd.close()
         
     async def _read_labjack_data(self):
-        while self.running:
-            await self._write_data_to_sd(await self._sample_data())
-            await asyncio.sleep(30 / self.sample_rate)
+        try:
+            while self.running:
+                await self._write_data_to_sd(await self._sample_data())
+                await asyncio.sleep(30 / self.sample_rate)
+        except Exception as e:
+            logger.error(f"Exception in reading labjack data: {e}")
             
     async def _sample_data(self):
         max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
