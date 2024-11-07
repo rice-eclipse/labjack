@@ -154,6 +154,7 @@ class LabjackInterface():
             values, at the expense of sample rate.
             """
         numFrames = len(reg_names)
+        ljm.eStreamStop(self.handle)
         ljm.close(self.handle)
         ljm.eWriteNames(self.handle, numFrames, reg_names, reg_values)
         if (int(ljm.eStreamStart(self.handle, scansPerRead, self.num_channels, aScanList, self.sample_rate))\
