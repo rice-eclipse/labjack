@@ -68,6 +68,7 @@ class ServiceDirector():
                     stop = loop.create_future()
                     loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
                     try:
+                        logger.error("Entering context")
                         async with serve(
                             ws_handle, 
                             self.config["general"]["HOST"], 
