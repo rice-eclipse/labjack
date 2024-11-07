@@ -7,6 +7,7 @@ import numpy as np
 from typing import List
 import csv
 import datetime as dt
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,8 @@ class LabjackInterface():
                 await self._write_data_to_sd(await self._sample_data())
                 await asyncio.sleep(0.1)
         except Exception as e:
-            logger.error(f"Exception in reading labjack data: {e}")
+            logger.error(f"Exception in reading labjack data:\n{e}")
+            traceback.print_exc()
             
     async def _sample_data(self):
         max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
