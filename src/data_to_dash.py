@@ -51,12 +51,15 @@ class DataSender:
         del self.clients[client.id]
 
     async def _start_sending(self):
-        while self.running:
-            if self.data_buf[0] and self.valve_state_buf[0]:
-                await self._sample_data_to_operator()
-            else:
-                logger.debug("Nothing in buffer")
-            await asyncio.sleep(self.delay / 1000)
+        try:
+            while self.running:
+                if self.data_buf[0] and self.valve_state_buf[0]:
+                    await self._sample_data_to_operator()
+                else:
+                    logger.debug("Nothing in buffer")
+                await asyncio.sleep(self.delay / 1000)
+        except Exception as e:
+            logger.error(f"Error in sending data: \n{e}")
 
     async def send_message(self, message: str):
         data = {
