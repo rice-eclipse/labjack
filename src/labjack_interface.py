@@ -62,7 +62,6 @@ class LabjackInterface():
         try:
             while self.running:
                 await self._write_data_to_sd(await self._sample_data())
-                await asyncio.sleep(0.1)
         except Exception as e:
             logger.error(f"Exception in reading labjack data:\n{e}")
             traceback.print_exc()
@@ -74,7 +73,6 @@ class LabjackInterface():
             read_val = ljm.eStreamRead(self.handle)
             new_rows += list(read_val[0])
             samples_in_ljm_buff = read_val[2]
-            logger.debug(f"{samples_in_ljm_buff=}")
             # print(samples_in_ljm_buff)
             # self.check_for_emergency(new_rows)
             self.total_samples_read += 1
@@ -156,6 +154,7 @@ class LabjackInterface():
             values, at the expense of sample rate.
             """
         numFrames = len(reg_names)
+        ljm.close(self.handle)
         ljm.eWriteNames(self.handle, numFrames, reg_names, reg_values)
         if (int(ljm.eStreamStart(self.handle, scansPerRead, self.num_channels, aScanList, self.sample_rate))\
             != self.sample_rate):
