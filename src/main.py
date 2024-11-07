@@ -67,13 +67,16 @@ class ServiceDirector():
                     loop = asyncio.get_event_loop()
                     stop = loop.create_future()
                     loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
-                    async with serve(
-                        ws_handle, 
-                        self.config["general"]["HOST"], 
-                        int(self.config["general"]["PORT"])
-                    ):
-                        logger.info("Starting websocket server...")
-                        await stop
+                    try:
+                        async with serve(
+                            ws_handle, 
+                            self.config["general"]["HOST"], 
+                            int(self.config["general"]["PORT"])
+                        ):
+                            logger.info("Starting websocket server...")
+                            await stop
+                    except Exception as e:
+                        logger.error(f"Server exception:\n{e}")
         
 def main():
     asyncio.run(ServiceDirector("config.ini").run())
