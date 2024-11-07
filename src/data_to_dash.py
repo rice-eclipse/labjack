@@ -31,6 +31,7 @@ class DataSender:
     async def _sample_data_to_operator(self):
         message = self._construct_message()
         message = json.dumps(message)
+        logger.info("sending...")
         for client in list(self.clients.values()):
             logger.info(f"Sending data to {client.id}")
             try:
