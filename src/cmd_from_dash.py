@@ -6,6 +6,7 @@ from labjack_interface import LabjackInterface
 from typing import Dict
 import logging
 from websockets.exceptions import ConnectionClosedError
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class CmdListener:
     
     async def __aenter__(self):
         logger.debug("Listening...")
+        logger.debug(f"{self.ljm_int=}")
         return self
     
     async def __aexit__(self, exc_type, exc_value, traceback):
@@ -30,22 +32,27 @@ class CmdListener:
                     cmd = json.loads(cmd)
                 except:
                     await self.data_sender.send_message("Invalid command syntax received!")
-                await self.process_command(cmd)
+                asyncio.create_task(self.process_command(cmd))
         except ConnectionClosedError as e:
             logger.error(f"Connection closed unexpectedly: {e}\n{e.__traceback__}")
 
     async def process_command(self, cmd: Dict):
         logger.debug("Received command: " + str(cmd))
-        if "type" not in cmd:
-            return
-        if cmd["type"] == "close":
-            logger.info("No longer listening for commands")
-            exit(0)
-        elif cmd["type"] == "Actuate" and (("driver_id") in cmd) and (("value") in cmd):
-            logger.info("Setting driver " + self.config["driver_mapping"][str(cmd["driver_id"])] + " to " + str(cmd["value"]))
-            await self.data_sender.send_message(f"Actuating driver id {cmd['driver_id']} - {cmd['value']}")
-            await self.ljm_int.actuate(self.config["driver_mapping"][str(cmd["driver_id"])], cmd["value"])
-        elif cmd["type"] == "Ignition":
-            await self.ljm_int.ignition_sequence()
-        else:
-            await self.data_sender.send_message("[W] Unknown command type: " + cmd["type"])
+        try:
+            if "type" not in cmd:
+                return
+            if cmd["type"] == "close":
+                logger.info("No longer listening for commands")
+                exit(0)
+            elif cmd["type"] == "Actuate" and (("driver_id") in cmd) and (("value") in cmd):
+                logger.info("Setting driver " + self.config["driver_mapping"][str(cmd["driver_id"])] + " to " + str(cmd["value"]))
+                await self.data_sender.send_message(f"Actuating driver id {cmd['driver_id']} - {cmd['value']}")
+                await self.ljm_int.actuate(self.config["driver_mapping"][str(cmd["driver_id"])], cmd["value"])
+            elif cmd["type"] == "Ignition":
+                await self.ljm_int.ignition_sequence()
+            elif cmd["type"] == "CancelIgnition":
+                await self.ljm_int.cancel_ignition()
+            else:
+                await self.data_sender.send_message("[W] Unknown command type: " + cmd["type"])
+        except Exception as e:
+            logger.error(f"Exception raised in processing command:\n{e}")

@@ -28,6 +28,7 @@ class LabjackInterface():
         self.total_samples_read = 0
         self.csv_writer = None
         self.csv_fd = None
+        self.ignition_in_progress = False
         # TODO: Why was the emergency check commented out earlier?
         
     async def __aenter__(self):
@@ -40,7 +41,8 @@ class LabjackInterface():
         for sensors in self.config["sensor_channel_mapping"]:
             cols.append(sensors)
         self.csv_writer.writerow(cols)
-        self.task = asyncio.create_task(self.log_readings())
+        self.task = asyncio.create_task(self._read_labjack_data())
+        return self
     
     async def __aexit__(self, exc_type, exc_value, traceback):
         self.running = False
@@ -55,12 +57,12 @@ class LabjackInterface():
         ljm.close(self.handle)
         self.csv_fd.close()
         
-    async def log_readings(self):
+    async def _read_labjack_data(self):
         while self.running:
-            await self.write_data_to_sd(await self.sample_data())
+            await self._write_data_to_sd(await self._sample_data())
             await asyncio.sleep(30 / self.sample_rate)
             
-    async def sample_data(self):
+    async def _sample_data(self):
         max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
         new_rows = []
         for i in range(max_reads):
@@ -73,10 +75,10 @@ class LabjackInterface():
             if self.total_samples_read % 1000 == 0: logger.info(f"{self.total_samples_read} samples obtained")
             if samples_in_ljm_buff == 0:
                 break
-        await self.update_valve_states()
+        await self._update_valve_states()
         return new_rows
 
-    def _voltages_to_values(self, sensor_vals):
+    def _voltages_to_values(self, sensor_vals: np.ndarray):
         if sensor_vals.size == 0: return []
         n_sensors = sensor_vals.copy()
         sensor_keys = list(self.config['sensor_channel_mapping'].keys())
@@ -110,7 +112,7 @@ class LabjackInterface():
     
         return n_sensors.tolist()
     
-    async def write_data_to_sd(self, data):
+    async def _write_data_to_sd(self, data: List[int]):
         num_new_rows = int(len(data) / self.num_channels)
         start_time   = (self.total_samples_read - num_new_rows) / self.sample_rate
         end_time     = (self.total_samples_read - 1) / self.sample_rate
@@ -124,7 +126,6 @@ class LabjackInterface():
 
         self.data_buf[0] = write_data[-1].tolist()[-self.num_channels:]
         self.csv_writer.writerows(write_data)
-        logger.info(write_data[:3,:3])
     
     def _clear_drivers(self):
         for driver in self.config["driver_mapping"]:
@@ -155,13 +156,25 @@ class LabjackInterface():
             raise Exception("Failed to configure LabJack data stream!")
         
     async def ignition_sequence(self):
+        self.ignition_in_progress = True
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
         for countdown in range(10, -1, -1):
+            if not self.ignition_in_progress:
+                break
             await self.data_sender.send_message(f"Ignition sequence in {countdown}...")
             await asyncio.sleep(1)
-        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
+        if self.ignition_in_progress:
+            await self.data_sender.send_message(f"IGNITION IN PROGRESS")
+            ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
+        else:
+            await self.data_sender.send_message(f"IGNITION CANCELED")
+            logger.warning("Ignition canceled")
+    
+    async def cancel_ignition(self):
+        await self.data_sender.send_message(f"Canceling ignition...")
+        self.ignition_in_progress = False
 
-    async def actuate(self, driver, value):
+    async def actuate(self, driver: int, value: bool):
         ljm.eWriteName(self.handle, driver, value)
         
     async def check_for_emergency(self, sensor_readings):
@@ -187,7 +200,7 @@ class LabjackInterface():
             idx += 1
         raise Exception("'sensor name' field of emergency config not found in sensors list")
 
-    async def update_valve_states(self):
+    async def _update_valve_states(self):
         states = []
         statebin = format(int(ljm.eReadName(self.handle,"EIO_STATE")),'05b')
         for char in statebin:

@@ -21,23 +21,23 @@ class DataSender:
         
     async def __aenter__(self):
         self.running = True
-        self.task = asyncio.create_task(self.start_sending())
+        self.task = asyncio.create_task(self._start_sending())
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         self.running = False
         await self.task
 
-    async def sample_data_to_operator(self):
+    async def _sample_data_to_operator(self):
         message = self._construct_message()
         message = json.dumps(message)
-        for client in self.clients.values():
+        for client in list(self.clients.values()):
             logger.info(f"Sending data to {client.id}")
             try:
                 await client.send(message)
             except websockets.ConnectionClosed as e:
                 print(f"Connection closed: {e.code} - {e.reason}")
-                await self.remove_client(client)
+                await self._remove_client(client)
             except Exception as e:
                 logger.error(e)
         logger.debug(f"Sent: {str(message)[:40]}")
@@ -46,13 +46,13 @@ class DataSender:
         logger.info(f"Added client {client.id}")
         self.clients[client.id] = client
 
-    async def remove_client(self, client: ServerConnection):
+    async def _remove_client(self, client: ServerConnection):
         del self.clients[client.id]
 
-    async def start_sending(self):
+    async def _start_sending(self):
         while self.running:
             if self.data_buf[0] and self.valve_state_buf[0]:
-                await self.sample_data_to_operator()
+                await self._sample_data_to_operator()
             else:
                 logger.debug("Nothing in buffer")
             await asyncio.sleep(self.delay / 1000)
