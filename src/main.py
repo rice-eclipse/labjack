@@ -63,7 +63,7 @@ class ServiceDirector():
                         logger.info(f"Incoming connection from {websocket.id}")
                         await data_sender.add_client(websocket)
                         await cmd_listener.recv_cmd(websocket)
-                    
+                    logger.error("Hi there")
                     loop = asyncio.get_event_loop()
                     stop = loop.create_future()
                     loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
