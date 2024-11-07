@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 class LabjackInterface():
     def __init__(self, config: ConfigParser, data_sender: DataSender, data_buf: List[List[int]], valve_state_buf = List[int]):
         self.handle = ljm.openS("T7", "USB", "ANY")
+        try:
+            ljm.eStreamStop(self.handle)
+            ljm.close(self.handle)
+        finally:
+            self.handle = ljm.openS("T7", "USB", "ANY")
         self.config = config
         self.sample_rate = int(self.config["general"]["sample_rate"])
         self.reads_per_sec = int(self.config["general"]["reads_per_sec"])
