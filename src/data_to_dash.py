@@ -60,6 +60,7 @@ class DataSender:
                 await asyncio.sleep(self.delay / 1000)
         except Exception as e:
             logger.error(f"Error in sending data: \n{e}")
+        logger.warning("Data sender no longer running")
 
     async def send_message(self, message: str):
         data = {
