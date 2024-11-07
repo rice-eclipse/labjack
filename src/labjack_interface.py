@@ -74,6 +74,7 @@ class LabjackInterface():
             read_val = ljm.eStreamRead(self.handle)
             new_rows += list(read_val[0])
             samples_in_ljm_buff = read_val[2]
+            logger.debug(f"{samples_in_ljm_buff=}")
             # print(samples_in_ljm_buff)
             # self.check_for_emergency(new_rows)
             self.total_samples_read += 1
