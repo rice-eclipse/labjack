@@ -61,7 +61,7 @@ class LabjackInterface():
         try:
             while self.running:
                 await self._write_data_to_sd(await self._sample_data())
-                await asyncio.sleep(30 / self.sample_rate)
+                await asyncio.sleep(0.1)
         except Exception as e:
             logger.error(f"Exception in reading labjack data: {e}")
             
