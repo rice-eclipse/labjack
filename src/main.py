@@ -79,7 +79,7 @@ class ServiceDirector():
                         logger.error(f"Server exception:\n{e}")
         
 def main():
-    asyncio.run(ServiceDirector("config.ini").run(debug=True))
+    asyncio.run(ServiceDirector("config.ini").run(),debug=True)
 
 print("\n===============================================================\
 \nData Acquisition and Remote Control for Eclipse Hybrid Engines\
