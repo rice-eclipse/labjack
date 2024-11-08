@@ -135,7 +135,6 @@ class DataSender:
         full_msg = {"tcs": message0, "pts": message1, "lcs": message2, "driver": statesmsg}
         sendstr = json.dumps(full_msg).encode('UTF-8')
         try:
-            print(sendstr)
             self.sock.sendall(sendstr)
             self.disconnect_t = None
 

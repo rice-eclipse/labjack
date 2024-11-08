@@ -21,6 +21,7 @@ def setup_socket(setup_sock):
     print("[I] Waiting for connection request...")
     setup_sock.listen()
     sock = setup_sock.accept()[0]
+    print("[I] Accepted socket connection!")
     sock.settimeout(.5)
     with open('lj_config.json', 'r') as file:
         config = json.load(file)

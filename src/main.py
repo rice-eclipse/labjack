@@ -33,7 +33,7 @@ from labjack import ljm
 import json
 import time
 from datetime import datetime
-
+#exit(0)
 def main():
     # Get config info from peer file
     config = configparser.ConfigParser()

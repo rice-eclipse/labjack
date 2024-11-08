@@ -53,6 +53,7 @@ class CmdListener:
                         decode_cmd = json.loads(cmd)
                     except:
                         print(type(cmd))
+                        print(cmd)
                         send_msg_to_operator(self.dash_sender, "[W] Invalid command syntax received!")
                         continue
                     print("[I] Received command: " + str(cmd))
