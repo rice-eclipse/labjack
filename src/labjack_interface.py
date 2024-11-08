@@ -159,7 +159,7 @@ class LabjackInterface():
             ljm.eWriteNames(self.handle, numFrames, reg_names, reg_values)
         except Exception as e:
             ljm.eStreamStop(self.handle)
-            ljm.close()
+            ljm.close(self.handle)
         if (int(ljm.eStreamStart(self.handle, scansPerRead, self.num_channels, aScanList, self.sample_rate))\
             != self.sample_rate):
             raise Exception("Failed to configure LabJack data stream!")
