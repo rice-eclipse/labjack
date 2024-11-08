@@ -57,7 +57,7 @@ class DataSender:
                 logger.debug("Nothing in buffer")
             await asyncio.sleep(self.delay / 1000)
 
-    async def send_message(self, message: str):
+    async def send_message(self, websocket: ServerConnection, message: str):
         data = {
             "sensors": [],
             "states": [],
@@ -65,6 +65,16 @@ class DataSender:
         }
         payload = json.dumps(data)
         logger.info(f"Sending message: '{message}'")
+        await websocket.send(payload)
+        
+    async def broadcast_message(self, message: str):
+        data = {
+            "sensors": [],
+            "states": [],
+            "console": message
+        }
+        payload = json.dumps(data)
+        logger.info(f"Broadcasting message: '{message}'")
         broadcast(self.clients.values(), payload)
 
     def _construct_message(self):

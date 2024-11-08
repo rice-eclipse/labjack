@@ -31,12 +31,12 @@ class CmdListener:
                 try:
                     cmd = json.loads(cmd)
                 except:
-                    await self.data_sender.send_message("Invalid command syntax received!")
-                asyncio.create_task(self.process_command(cmd))
+                    await self.data_sender.send_message(websocket, "Invalid command syntax received!")
+                asyncio.create_task(self.process_command(cmd, websocket))
         except ConnectionClosedError as e:
             logger.error(f"Connection closed unexpectedly: {e}\n{e.__traceback__}")
 
-    async def process_command(self, cmd: Dict):
+    async def process_command(self, cmd: Dict, websocket: ServerConnection):
         logger.debug("Received command: " + str(cmd))
         try:
             if "type" not in cmd:
@@ -45,14 +45,22 @@ class CmdListener:
                 logger.info("No longer listening for commands")
                 exit(0)
             elif cmd["type"] == "Actuate" and (("driver_id") in cmd) and (("value") in cmd):
+                logger.error(cmd["password"])
+                logger.error(self.config["general"]["password"])
+                if ("password" not in cmd) or (cmd["password"] != self.config["general"]["password"]):
+                    await self.data_sender.send_message(websocket, "Actuate failed: Invalid password")
+                    return
                 logger.info("Setting driver " + self.config["driver_mapping"][str(cmd["driver_id"])] + " to " + str(cmd["value"]))
-                await self.data_sender.send_message(f"Actuating driver id {cmd['driver_id']} - {cmd['value']}")
+                await self.data_sender.broadcast_message(f"Actuating driver id {cmd['driver_id']} - {cmd['value']}")
                 await self.ljm_int.actuate(self.config["driver_mapping"][str(cmd["driver_id"])], cmd["value"])
             elif cmd["type"] == "Ignition":
+                if ("password" not in cmd) or (cmd["password"] != self.config["general"]["password"]):
+                    await self.data_sender.send_message(websocket, "Ignition failed: Invalid password")
+                    return
                 await self.ljm_int.ignition_sequence()
             elif cmd["type"] == "CancelIgnition":
                 await self.ljm_int.cancel_ignition()
             else:
-                await self.data_sender.send_message("[W] Unknown command type: " + cmd["type"])
+                await self.data_sender.send_message(websocket, "Unknown command type: " + cmd["type"])
         except Exception as e:
             logger.error(f"Exception raised in processing command:\n{e}")
