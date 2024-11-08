@@ -65,6 +65,7 @@ class LabjackInterface():
     async def _read_labjack_data(self):
         while self.running:
             await self._write_data_to_sd(await self._sample_data())
+            await asyncio.sleep(0.001)
             
     async def _sample_data(self):
         max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows

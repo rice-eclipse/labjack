@@ -80,7 +80,7 @@ def main():
 
 print("\n===============================================================\
 \nData Acquisition and Remote Control for Eclipse Hybrid Engines\
-\nSoftware version 1.2.0\
+\nSoftware version 2.0.0\
 \n===============================================================")
 main()
 print("[I] Stopping program")
