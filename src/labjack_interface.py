@@ -166,18 +166,23 @@ class LabjackInterface():
         
     async def ignition_sequence(self):
         self.ignition_in_progress = True
-        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
         for countdown in range(10, -1, -1):
             if not self.ignition_in_progress:
                 break
-            await self.data_sender.send_message(f"Ignition sequence in {countdown}...")
+            await self.data_sender.send_message(f"Ignition in {countdown}...")
             await asyncio.sleep(1)
         if self.ignition_in_progress:
             await self.data_sender.send_message(f"IGNITION IN PROGRESS")
-            ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
-        else:
+            ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
+            for countdown in range(10, -1, -1):
+                if not self.ignition_in_progress:
+                    break
+                await self.data_sender.send_message(f"IGNITING FOR {countdown} MORE SECONDS")
+                await asyncio.sleep(1)
+        if not self.ignition_in_progress:
             await self.data_sender.send_message(f"IGNITION CANCELED")
             logger.warning("Ignition canceled")
+        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
     
     async def cancel_ignition(self):
         await self.data_sender.send_message(f"Canceling ignition...")
