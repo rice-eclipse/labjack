@@ -155,7 +155,11 @@ class LabjackInterface():
             values, at the expense of sample rate.
             """
         numFrames = len(reg_names)
-        ljm.eWriteNames(self.handle, numFrames, reg_names, reg_values)
+        try:
+            ljm.eWriteNames(self.handle, numFrames, reg_names, reg_values)
+        except Exception as e:
+            ljm.eStreamStop(self.handle)
+            ljm.close()
         if (int(ljm.eStreamStart(self.handle, scansPerRead, self.num_channels, aScanList, self.sample_rate))\
             != self.sample_rate):
             raise Exception("Failed to configure LabJack data stream!")

@@ -32,13 +32,14 @@ import signal
 from labjack_interface import LabjackInterface
 import logging
 import sys
+import datetime as dt
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.DEBUG, 
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("log.log")
+        logging.FileHandler(f"log_{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.log")
     ]
 )
 
@@ -49,7 +50,6 @@ class ServiceDirector():
         self._validate_config()
         self.data_buf = [None]
         self.valve_state_buf = [None]
-        logger.info("Hi")
         
     def _validate_config(self):
         pass
