@@ -1,5 +1,6 @@
 """
 Data Acquisition and Remote Control for Eclipse Hybrid Engines
+Ian Rundle, President '23-24
 Spencer Darwall, Avionics & Software Lead '22-23
 
 Code interfaces with LabJack device hardware via LJM Library. The LabJack
@@ -23,103 +24,63 @@ Run-on-startup config at: /home/eclipsepi/.config/systemd/user/labjack.service
 """
 
 from data_to_dash import DataSender
-from logging_and_eshutdown import DataLogger
 from cmd_from_dash import CmdListener
-from common_util import setup_socket, open_file, send_msg_to_operator, clear_drivers, stream_setup, set_close
-import configparser
-import socket
-from threading import Lock
-from labjack import ljm
-import json
-import time
-from datetime import datetime
+from configparser import ConfigParser
+from websockets.asyncio.server import ServerConnection, serve
+import asyncio
+import signal
+from labjack_interface import LabjackInterface
+import logging
+import sys
+import datetime as dt
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.DEBUG, 
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(f"log_{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.log")
+    ]
+)
+
+class ServiceDirector():
+    def __init__(self, config_file: str):
+        self.config = ConfigParser()
+        self.config.read(config_file)
+        self._validate_config()
+        self.data_buf = [None]
+        self.valve_state_buf = [None]
+        
+    def _validate_config(self):
+        pass
+    
+    async def run(self):
+        logger.info("Running...")
+        async with DataSender(self.config, self.data_buf, self.valve_state_buf) as data_sender:
+            async with LabjackInterface(self.config, data_sender, self.data_buf, self.valve_state_buf) as ljm_int:
+                async with CmdListener(self.config, data_sender, ljm_int) as cmd_listener:
+                    async def ws_handle(websocket: ServerConnection):
+                        logger.info(f"Incoming connection from {websocket.id}")
+                        await data_sender.add_client(websocket)
+                        await cmd_listener.recv_cmd(websocket)
+                    
+                    loop = asyncio.get_event_loop()
+                    stop = loop.create_future()
+                    loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
+                    async with serve(
+                        ws_handle, 
+                        self.config["general"]["HOST"], 
+                        int(self.config["general"]["PORT"])
+                    ):
+                        logger.info("Starting websocket server...")
+                        await stop
+        
 def main():
-    # Get config info from peer file
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    SAMPLE_RATE   = int(config["general"]["sample_rate"])
-    READS_PER_SEC = int(config["general"]["reads_per_sec"])
-    NUM_CHANNELS  = len(config["sensor_channel_mapping"].keys())
+    asyncio.run(ServiceDirector("config.ini").run())
 
-    # Setup socket for mission control
-    setup_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    setup_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-    print("[I] Binding socket to " + str(config["general"]["HOST"])\
-          + ":" + str(config["general"]["PORT"]))
-
-    setup_sock.bind((config["general"]["HOST"], int(config["general"]["PORT"])))
-
-    # Wait for connection
-    sock = setup_socket(setup_sock)
-    setup_sock.settimeout(.5)
-
-    JSONData = {}
-    JSONData['sensors'] = [0,0,0,0]
-    JSONData['states'] = [0,0,0,0]
-    JSONData['console'] = "data"
-    JSONData['timestamp'] = ""
-    JSONObj = json.dumps(JSONData)
-    sendStr = JSONObj.encode('UTF-8')
-    sock.sendall(sendStr)
-
-    fd, f = open_file(config)
-    try:
-        # Start necessary workers
-        close         = [0] # global shutdown indicator
-        close_lock    = Lock()
-        data_buf      = [[]] # special buffer for data sent to dashboard
-        data_buf_lock = Lock()
-
-        dash_sender = DataSender(config, setup_sock, sock, close, close_lock, data_buf, data_buf_lock)
-        dash_sender.start_thread()
-
-        cmd_listener = CmdListener(config, sock, close, close_lock, dash_sender)
-        cmd_listener.start_thread()
-        dash_sender.cmd_listener = cmd_listener
-
-            # Open connection to LabJack device
-
-        data_logger = DataLogger(config, close, close_lock, data_buf, data_buf_lock, \
-                                fd, dash_sender, SAMPLE_RATE, NUM_CHANNELS)
-        handle = ljm.openS("T7", "USB", "ANY")
-
-        # Default all drivers (in case of improper shutdown)
-        clear_drivers(config, handle)
-        stream_setup(config, handle, NUM_CHANNELS, SAMPLE_RATE, READS_PER_SEC)
-
-        dash_sender.handle  = handle
-        cmd_listener.handle = handle
-        data_logger.handle  = handle
-        data_logger.start_reading() # Using main thread
-
-        # Wait for shutdown condition
-    except (Exception, KeyboardInterrupt) as e:
-        print("[E] Exception: " + str(e))
-        set_close(close, close_lock)
-        try: clear_drivers(config, handle)
-        except: pass
-        ljm.eStreamStop(handle)
-        ljm.close(handle)
-        sock.close()
-        dash_sender.join_thread()
-        cmd_listener.join_thread()
-        raise e
-
-    try: clear_drivers(config, handle)
-    except: pass
-    ljm.eStreamStop(handle)
-    ljm.close(handle)
-    sock.close()
-    dash_sender.join_thread()
-    cmd_listener.join_thread()
-    return
-
-if __name__ == '__main__':
-    print("\n===============================================================\
-    \nData Acquisition and Remote Control for Eclipse Hybrid Engines\
-    \nSoftware version 1.2.0\
-    \n===============================================================")
-    main()
-    print("[I] Stopping program")
+print("\n===============================================================\
+\nData Acquisition and Remote Control for Eclipse Hybrid Engines\
+\nSoftware version 2.0.0\
+\n===============================================================")
+main()
+print("[I] Stopping program")

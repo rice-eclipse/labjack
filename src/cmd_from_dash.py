@@ -1,75 +1,66 @@
-from common_util import should_close, set_close, send_msg_to_operator
-import socket
 import json
-import time
-from threading import Thread
-from labjack import ljm
+from websockets.asyncio.server import ServerConnection
+from data_to_dash import DataSender
+from configparser import ConfigParser
+from labjack_interface import LabjackInterface
+from typing import Dict
+import logging
+from websockets.exceptions import ConnectionClosedError
+import asyncio
+
+logger = logging.getLogger(__name__)
 
 class CmdListener:
-    def __init__(self, config, sock, close, close_lock, dash_sender):
-        self.config      = config
-        self.sock        = sock
-        self.close       = close
-        self.close_lock  = close_lock
-        self.handle      = None
-        self.dash_sender = dash_sender
+    def __init__(self, config: ConfigParser, data_sender: DataSender, ljm_int: LabjackInterface):
+        self.config = config
+        self.data_sender = data_sender
+        self.ljm_int = ljm_int
+    
+    async def __aenter__(self):
+        logger.debug("Listening...")
+        logger.debug(f"{self.ljm_int=}")
+        return self
+    
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        logger.debug("Exiting command listener context...")
 
-        self.cmd_thread  = Thread(target = self.listen, args = ())
-        self.ign_thread  = Thread(target = self.ignition_sequence, args = ())
-
-    def start_thread(self):
-        self.cmd_thread.start()
-
-    def join_thread(self):
-        self.cmd_thread.join()
-
-    def recv_cmd(self):
+    async def recv_cmd(self, websocket: ServerConnection):
+        logger.info(websocket)
         try:
-            return self.sock.recv(2048).decode('utf-8')
-        except socket.timeout:
-            time.sleep(.001)
-            return None
-        except socket.error:
-            # Shared socket; wait for DashSender to fix it (otherwise race condition arises)
-            time.sleep(.05)
-            return None
+            async for cmd in websocket:
+                try:
+                    cmd = json.loads(cmd)
+                except:
+                    await self.data_sender.send_message(websocket, "Invalid command syntax received!")
+                asyncio.create_task(self.process_command(cmd, websocket))
+        except ConnectionClosedError as e:
+            logger.error(f"Connection closed unexpectedly: {e}\n{e.__traceback__}")
 
-    def ignition_sequence(self):
-        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
-        send_msg_to_operator(self.dash_sender, "[I] Igniting...")
-        time.sleep(10)
-        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
-        self.ign_thread  = Thread(target = self.ignition_sequence, args = ())
-
-    def start_thread(self):
-        self.cmd_thread.start()
-
-    def listen(self):
+    async def process_command(self, cmd: Dict, websocket: ServerConnection):
+        logger.debug("Received command: " + str(cmd))
         try:
-            while not should_close(self.close, self.close_lock):
-                cmd = self.recv_cmd()
-                if (cmd is not None) and (cmd != ""):
-                    try:
-                        decode_cmd = json.loads(cmd)
-                    except:
-                        print(type(cmd))
-                        send_msg_to_operator(self.dash_sender, "[W] Invalid command syntax received!")
-                        continue
-                    print("[I] Received command: " + str(cmd))
-                    if "type" not in decode_cmd: continue
-                    if decode_cmd["type"] == "close":
-                        print("[I] No longer listening for commands")
-                        set_close(self.close, self.close_lock)
-                    elif self.handle == None:
-                        send_msg_to_operator(self.dash_sender, "[E] Dropping command; no active LabJack handle")
-                    elif decode_cmd["type"] == "Actuate" and (("driver_id") in decode_cmd) and (("value") in decode_cmd):
-                        print("[I] Setting driver " + self.config["driver_mapping"][str(decode_cmd["driver_id"])] + " to " + str(decode_cmd["value"]))
-                        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(decode_cmd["driver_id"])], decode_cmd["value"])
-                    elif decode_cmd["type"] == "Ignition":
-                        if not self.ign_thread.is_alive(): self.ign_thread.start()
-                    else:
-                        send_msg_to_operator(self.dash_sender, "[W] Unknown command: " + decode_cmd["type"])
-                else: time.sleep(.001)
+            if "type" not in cmd:
+                return
+            if cmd["type"] == "close":
+                logger.info("No longer listening for commands")
+                exit(0)
+            elif cmd["type"] == "Actuate" and (("driver_id") in cmd) and (("value") in cmd):
+                logger.error(cmd["password"])
+                logger.error(self.config["general"]["password"])
+                if ("password" not in cmd) or (cmd["password"] != self.config["general"]["password"]):
+                    await self.data_sender.send_message(websocket, "Actuate failed: Invalid password")
+                    return
+                logger.info("Setting driver " + self.config["driver_mapping"][str(cmd["driver_id"])] + " to " + str(cmd["value"]))
+                await self.data_sender.broadcast_message(f"Actuating driver id {cmd['driver_id']} - {cmd['value']}")
+                await self.ljm_int.actuate(self.config["driver_mapping"][str(cmd["driver_id"])], cmd["value"])
+            elif cmd["type"] == "Ignition":
+                if ("password" not in cmd) or (cmd["password"] != self.config["general"]["password"]):
+                    await self.data_sender.send_message(websocket, "Ignition failed: Invalid password")
+                    return
+                await self.ljm_int.ignition_sequence()
+            elif cmd["type"] == "CancelIgnition":
+                await self.ljm_int.cancel_ignition()
+            else:
+                await self.data_sender.send_message(websocket, "Unknown command type: " + cmd["type"])
         except Exception as e:
-            set_close(self.close, self.close_lock)
-            raise e
+            logger.error(f"Exception raised in processing command:\n{e}")
