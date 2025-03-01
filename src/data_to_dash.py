@@ -66,7 +66,9 @@ class DataSender:
         if self.data_buf_lock.acquire(timeout = .01):
             JSONData['sensors'] = self.data_buf[0]
             buf_data = self.data_buf[0]
-            if not JSONData['sensors']: return
+            if not JSONData['sensors']: 
+                self.data_buf_lock.release()
+                return
             self.data_buf_lock.release()
         else: return
 

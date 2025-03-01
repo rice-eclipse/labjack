@@ -43,7 +43,10 @@ class DataLogger:
             max_reads = 15 # In case of extreme loopback lag allow max of 15 new rows
             new_rows = []
             for i in range(max_reads):
-                read_val = ljm.eStreamRead(self.handle)
+                try:
+                    read_val = ljm.eStreamRead(self.handle)
+                except ljm.LJMError as err:
+                    print(err.errorCode)
                 new_rows += list(read_val[0])
                 samples_in_ljm_buff = read_val[2]
                 # print(samples_in_ljm_buff)
