@@ -57,6 +57,11 @@ class CmdListener:
                 if ("password" not in cmd) or (cmd["password"] != self.config["general"]["password"]):
                     await self.data_sender.send_message(websocket, "Ignition failed: Invalid password")
                     return
+                await self.ljm_int.ignition_sequence()
+            elif cmd["type"] == "Proxima Ignition":
+                if ("password" not in cmd) or (cmd["password"] != self.config["general"]["password"]):
+                    await self.data_sender.send_message(websocket, "Ignition failed: Invalid password")
+                    return
                 await self.ljm_int.proxima_ignition_sequence()
             elif cmd["type"] == "CancelIgnition":
                 await self.ljm_int.cancel_ignition()

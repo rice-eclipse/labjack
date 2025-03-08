@@ -186,19 +186,31 @@ class LabjackInterface():
     
     async def proxima_ignition_sequence(self):
         self.ignition_in_progress = True
+        for countdown in range(10, -1, -1):
+            if not self.ignition_in_progress:
+                break
+            await self.data_sender.broadcast_message(f"Ignition in {countdown}...")
+            await asyncio.sleep(1)
         if self.ignition_in_progress:
-            await self.data_sender.broadcast_message("STARTING IGNITION")
+            #opens ox fill for one second
+            await self.data_sender.broadcast_message(f"Opening ox fill")
+            ljm.eWriteName(self.handle, self.config["driver_mapping"]["0"], True)
+            for valve_delay in range(1,-1,-1):
+                await asyncio.sleep(1)
             await self.data_sender.broadcast_message(f"IGNITION IN PROGRESS")
 
+            #turns on igniters
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
             for countdown in range(10, -1, -1):
                 if not self.ignition_in_progress:
                     break
                 await self.data_sender.broadcast_message(f"IGNITING FOR {countdown} MORE SECONDS")
                 await asyncio.sleep(1)
-        else:
+        if not self.ignition_in_progress:
             await self.data_sender.broadcast_message(f"IGNITION CANCELED")
             logger.warning("Ignition canceled")
+        #closes ox fill
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["0"], False)
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
 
 
