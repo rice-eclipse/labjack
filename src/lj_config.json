@@ -116,6 +116,13 @@
             "protected": false
         },
         {
+            "label": "Pressurization",
+            "label_actuate": "Open",
+            "label_deactuate": "Close",
+            "pin": 6,
+            "protected": false
+        },
+        {
             "label": "Ignition",
             "label_actuate": "Ignite",
             "label_deactuate": "Shutoff",
@@ -174,6 +181,11 @@
             "type": "Actuate",
             "driver_id": 2,
             "value": true
+        },
+        {
+            "type": "Actuate",
+            "driver_id": 3,
+            "value": false
         },
         {
             "type": "Actuate",
