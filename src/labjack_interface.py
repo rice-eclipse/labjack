@@ -195,8 +195,10 @@ class LabjackInterface():
             #opens ox fill for one second
             await self.data_sender.broadcast_message(f"Opening ox fill")
             ljm.eWriteName(self.handle, self.config["driver_mapping"]["0"], True)
-            for valve_delay in range(1,-1,-1):
+            for valve_delay in range(0,-1,-1):
+                await self.data_sender.broadcast_message("Waiting for one second")
                 await asyncio.sleep(1)
+                
             await self.data_sender.broadcast_message(f"IGNITION IN PROGRESS")
 
             #turns on igniters
@@ -209,10 +211,11 @@ class LabjackInterface():
         if not self.ignition_in_progress:
             await self.data_sender.broadcast_message(f"IGNITION CANCELED")
             logger.warning("Ignition canceled")
-        #closes ox fill
+        #closes nitrous feed valve (ox fill)
         ljm.eWriteName(self.handle, self.config["driver_mapping"]["0"], False)
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
-
+        #closes ops pneumatic valve
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["2"], False)
 
     async def cancel_ignition(self):
         self.ignition_in_progress = False
@@ -246,9 +249,10 @@ class LabjackInterface():
 
     async def _update_valve_states(self):
         states = []
-        statebin = format(int(ljm.eReadName(self.handle,"EIO_STATE")),'05b')
+        statebin = format(int(ljm.eReadName(self.handle,"EIO_STATE")),'06b')
         for char in statebin:
             states.append(int(char))
         statebin = format(int(ljm.eReadName(self.handle,"CIO_STATE")),'04b')
         states = [(int(statebin[1]))] + states
         self.valve_state_buf[0] = states[::-1]
+        print(self.valve_state_buf[0])

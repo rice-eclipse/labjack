@@ -36,10 +36,13 @@ import datetime as dt
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    level=logging.DEBUG, 
+    
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(f"log_{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.log")
+        logging.FileHandler(f"../logs/log_{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.log")
     ]
 )
 
