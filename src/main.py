@@ -33,6 +33,10 @@ from labjack_interface import LabjackInterface
 import logging
 import sys
 import datetime as dt
+import argparse
+
+PROXIMA_PATH = "proxima_logs"
+SPHINX_PATH = "sphinx_logs"
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -42,7 +46,8 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(f"../logs/log_{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.log")
+        #Change this between Sphinx and Proxima
+        logging.FileHandler(f"../{PROXIMA_PATH}/log_{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.log")
     ]
 )
 
@@ -79,7 +84,12 @@ class ServiceDirector():
                         await stop
         
 def main():
-    asyncio.run(ServiceDirector("config.ini").run())
+    #chooses config file based on config passed in at startup
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config')
+    args = parser.parse_args()
+
+    asyncio.run(ServiceDirector(args.config).run())
 
 print("\n===============================================================\
 \nData Acquisition and Remote Control for Eclipse Hybrid Engines\

@@ -22,6 +22,7 @@ class LabjackInterface():
         self.sample_rate = int(self.config["general"]["sample_rate"])
         self.reads_per_sec = int(self.config["general"]["reads_per_sec"])
         self.num_channels = len(self.config["sensor_channel_mapping"].keys())
+        self.data_file = self.config["general"]["data_path"]
         self.data_sender = data_sender
         self._clear_drivers()
         self._stream_setup()
@@ -34,11 +35,15 @@ class LabjackInterface():
         self.csv_writer = None
         self.csv_fd = None
         self.ignition_in_progress = False
-        # TODO: Why was the emergency check commented out earlier?
+        emergency_cfg = self.config["proxima_emergency_shutdown"]
+        self.strikes = 0
+        self.emergency_max_pressure = int(emergency_cfg["max_pressure"])
+        self.shutdown_driver_name = self.config["driver_mapping"][emergency_cfg["shutdown_valve"]]
+        self.emergency_shutdown_triggered = False
         
     async def __aenter__(self):
         self.running = True
-        filename = f"../data/{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.csv"
+        filename = f"../{self.data_file}/{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.csv"
         self.csv_fd = open(filename, "x")
         self.csv_writer = csv.writer(self.csv_fd)
         logger.info(f"Created new file: {filename}")
@@ -72,10 +77,12 @@ class LabjackInterface():
         new_rows = []
         for i in range(max_reads):
             read_val = ljm.eStreamRead(self.handle)
-            new_rows += list(read_val[0])
+            read_chunk = read_val[0]
+            new_rows += list(read_chunk)
             samples_in_ljm_buff = read_val[2]
             # print(samples_in_ljm_buff)
-            # self.check_for_emergency(new_rows)
+            if len(read_chunk) >= self.num_channels:
+                await self.check_for_emergency(read_chunk[-self.num_channels + self.e_index])
             self.total_samples_read += 1
             if self.total_samples_read % 1000 == 0: logger.info(f"{self.total_samples_read} samples obtained")
             if samples_in_ljm_buff == 0:
@@ -187,6 +194,66 @@ class LabjackInterface():
             logger.warning("Ignition canceled")
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
     
+    async def sphinx_short_ignition_sequence(self):
+        self.ignition_in_progress = True
+        for countdown in range(5, -1, -1):
+            if not self.ignition_in_progress:
+                break
+            await self.data_sender.broadcast_message(f"Ignition in {countdown}...")
+            await asyncio.sleep(1)
+        if self.ignition_in_progress:
+            #open ethanol/fuel run valve and wait 3 sec
+            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),1)
+            await(self.data_sender.broadcast_message("Opening fuel_run for 3 seconds"))
+            for ethanol_delay in range(2,-1,-1):
+                await asyncio.sleep(1)
+            #open nitrous and start ignition at the same time for 1 second
+            self.servo_actuate(int(self.config["servo_mapping"]["nitrous_run"]),1)
+            ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
+            for ignition in range(0,-1,-1):
+                if not self.ignition_in_progress:
+                    break
+                await self.data_sender.broadcast_message(f"IGNITING FOR {countdown} MORE SECONDS")
+                await asyncio.sleep(1)
+            if not self.ignition_in_progress:
+                await self.data_sender.broadcast_message(f"IGNITION CANCELED")
+                logger.warning("Ignition canceled")
+            #turns off igniters and closes fuel run and nitrous valves
+            ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
+            self.servo_actuate(int(self.config["servo_mapping"]["nitrous_run"]),0)
+            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),0)
+    
+    async def sphinx_long_ignition_sequence(self):
+        self.ignition_in_progress = True
+        for countdown in range(5, -1, -1):
+            if not self.ignition_in_progress:
+                break
+            await self.data_sender.broadcast_message(f"Ignition in {countdown}...")
+            await asyncio.sleep(1)
+        if self.ignition_in_progress:
+            #open ethanol/fuel run valve and wait 3 sec
+            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),1)
+            await(self.data_sender.broadcast_message("Opening fuel_run for 3 seconds"))
+            for ethanol_delay in range(2,-1,-1):
+                await asyncio.sleep(1)
+            #open fuel_run nitrous and start ignition at the same time for 1 second
+            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),1)
+            self.servo_actuate(int(self.config["servo_mapping"]["nitrous_run"]),1)
+            ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
+            for ignition in range(4,-1,-1):
+                if not self.ignition_in_progress:
+                    break
+                await self.data_sender.broadcast_message(f"IGNITING FOR {countdown} MORE SECONDS")
+                await asyncio.sleep(1)
+            if not self.ignition_in_progress:
+                await self.data_sender.broadcast_message(f"IGNITION CANCELED")
+                logger.warning("Ignition canceled")
+            #turns off igniters and closes fuel run and nitrous valves
+            ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
+            self.servo_actuate(int(self.config["servo_mapping"]["nitrous_run"]),0)
+            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),0)
+
+
     async def proxima_ignition_sequence(self):
         self.ignition_in_progress = True
         for countdown in range(10, -1, -1):
@@ -227,15 +294,18 @@ class LabjackInterface():
     async def actuate(self, driver: int, value: bool):
         ljm.eWriteName(self.handle, driver, value)
         
-    async def check_for_emergency(self, sensor_readings):
-        if sensor_readings[-self.num_channels:][self.e_index] > int(self.config["proxima_emergency_shutdown"]["max_pressure"]):
+    async def check_for_emergency(self, emergency_sensor_value: float):
+        if self.emergency_shutdown_triggered:
+            return
+        if emergency_sensor_value > self.emergency_max_pressure:
             '''TODO: we probably need to bound this condition so invalid readings from the sensor being
                unplugged dont falsely trigger emergency'''
             self.strikes += 1
             if (self.strikes >= 3):
                 # 3 bad values in a row -> emergency shutdown
-                ljm.eWriteName(self.handle, self.config["proxima_emergency_shutoff"]["shutdown_valve"], 0)
-                await self.data_sender.send("Emergency shutdown executed!")
+                self.emergency_shutdown_triggered = True
+                ljm.eWriteName(self.handle, self.shutdown_driver_name, 0)
+                await self.data_sender.broadcast_message("Emergency shutdown executed!")
         else:
             self.strikes = 0
             
