@@ -7,6 +7,8 @@ import numpy as np
 from typing import List
 import csv
 import datetime as dt
+import subprocess
+from time import time
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ class LabjackInterface():
         self.csv_writer = None
         self.csv_fd = None
         self.ignition_in_progress = False
+        self.video_process = None
         # TODO: Why was the emergency check commented out earlier?
         
     async def __aenter__(self):
@@ -100,9 +103,6 @@ class LabjackInterface():
             elif key_prefix == "b_load":
                 offset_key = 'big_lc_offset'
                 scale_key = 'big_lc_scale'
-            elif key_prefix == "k_load":
-                offset_key = 'k_lc_offset'
-                scale_key = 'k_lc_scale'
             elif key_prefix == "s_load":
                 offset_key = 'small_lc_offset'
                 scale_key = 'small_lc_scale'
@@ -169,7 +169,7 @@ class LabjackInterface():
         
     async def ignition_sequence(self):
         self.ignition_in_progress = True
-        for countdown in range(10, 0, -1):
+        for countdown in range(10, -1, -1):
             if not self.ignition_in_progress:
                 break
             await self.data_sender.broadcast_message(f"Ignition in {countdown}...")
@@ -177,7 +177,7 @@ class LabjackInterface():
         if self.ignition_in_progress:
             await self.data_sender.broadcast_message(f"IGNITION IN PROGRESS")
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
-            for countdown in range(10, 0, -1):
+            for countdown in range(10, -1, -1):
                 if not self.ignition_in_progress:
                     break
                 await self.data_sender.broadcast_message(f"IGNITING FOR {countdown} MORE SECONDS")
@@ -188,6 +188,8 @@ class LabjackInterface():
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
     
     async def proxima_ignition_sequence(self):
+        if not self.ignition_in_progress:
+            self.start_camera()
         self.ignition_in_progress = True
         for countdown in range(10, -1, -1):
             if not self.ignition_in_progress:
@@ -219,8 +221,11 @@ class LabjackInterface():
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
         #closes ops pneumatic valve
         ljm.eWriteName(self.handle, self.config["driver_mapping"]["5"], False)
+        self.stop_camera()
 
     async def cancel_ignition(self):
+        if self.ignition_in_progress:
+            self.stop_camera()
         self.ignition_in_progress = False
         await self.data_sender.broadcast_message(f"Canceling ignition...")
 
@@ -258,4 +263,41 @@ class LabjackInterface():
         statebin = format(int(ljm.eReadName(self.handle,"CIO_STATE")),'04b')
         states = [(int(statebin[1]))] + states
         self.valve_state_buf[0] = states[::-1]
-        print(self.valve_state_buf[0])
+        #print(self.valve_state_buf[0])
+
+    """
+    Start the camera for recording video
+    """
+    def start_camera(self):
+        if self.video_process is not None:
+            logger.debug("We already have a video process! Ending that one and starting another")
+            self.stop_camera()
+        logger.debug("About to check for external usage of device")
+        if len(subprocess.run("fuser /dev/video0", shell=True, capture_output=True, timeout=1.0).stdout) > 0:
+            logger.debug("Warning! Video device already in use. Killing process")
+            subprocess.run("fuser -k /dev/video0", shell=True, capture_output=True, timeout=1.0)
+        logger.debug("abt to create video process")
+        output_file_path = "log.txt"
+        with open(output_file_path, "w") as f:
+    
+            self.video_process = subprocess.Popen(
+                r"""ffmpeg -i /dev/video0 -vf "fps=fps=30, scale=1920:1080, drawtext=fontsize=60:fontcolor=yellow:text='%{pts\:hms}':x=(w-text_w):y=(h-text_h)" -c:v ffvhuff -preset ultrafast /home/eclipsepi/labjack_proxima/labjack/videos/""" + f"{int(time())}.mkv",
+                stdin=subprocess.PIPE,
+                stdout=f,
+                #stderr=subprocess.STDOUT,
+                shell=True
+            )
+
+
+    """
+    Stop the camera safely
+    """
+    def stop_camera(self):
+        if self.video_process is not None:
+            logger.debug("Stopping video process")
+            try:
+                self.video_process.stdin.write(str.encode("q"))
+                self.video_process.stdin.flush()
+            except BrokenPipeError:
+                logger.debug("Video process encountered BrokenPipeError")
+            self.video_process = None

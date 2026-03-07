@@ -129,6 +129,10 @@ class DataSender:
                         "sensor_id": 0,
                         "reading": buf_data[0],
                     },
+                    {
+                        "sensor_id": 1,
+                        "reading": buf_data[1]
+                    }
                 ]
             },
             "driver": {
