@@ -7,7 +7,7 @@ import numpy as np
 from typing import List
 import csv
 import datetime as dt
-
+import RPi.GPIO as GPIO
 logger = logging.getLogger(__name__)
 
 class LabjackInterface():
@@ -35,11 +35,17 @@ class LabjackInterface():
         self.csv_writer = None
         self.csv_fd = None
         self.ignition_in_progress = False
-        emergency_cfg = self.config["proxima_emergency_shutdown"]
-        self.strikes = 0
-        self.emergency_max_pressure = int(emergency_cfg["max_pressure"])
-        self.shutdown_driver_name = self.config["driver_mapping"][emergency_cfg["shutdown_valve"]]
-        self.emergency_shutdown_triggered = False
+        self.pwm_frequency = int(self.config["pwm_configs"]["frequency"])
+        self.closed_duty_cycle = int(self.config["pwm_configs"]["closed_duty_cycle"])
+        self.open_duty_cycle = int(self.config["pwm_configs"]["open_duty_cycle"])
+        #shitty solution, but whatever
+        self.nitrous_run_state = 0
+        self.fuel_run_state = 0
+        #these should be lists if we have more servos
+        self.nitrous_run_servo = None
+        self.fuel_run_servo = None
+        self.nitrous_run_servo_pin = int(self.config["servo_mapping"]["nitrous_run"])
+        self.fuel_run_servo_pin = int(self.config["servo_mapping"]["fuel_run"])
         
     async def __aenter__(self):
         self.running = True
@@ -145,7 +151,28 @@ class LabjackInterface():
     def _clear_drivers(self):
         for driver in self.config["driver_mapping"]:
             ljm.eWriteName(self.handle, self.config["driver_mapping"][driver], 0)
+        if self.config["general"]["engine"] == "sphinx":
+            self._initialize_servos()
+
+    def _initialize_servos(self):
+        GPIO.setmode(GPIO.BOARD)
+        GPIO.setup(self.nitrous_run_servo_pin, GPIO.OUT)
+        self.nitrous_run_servo = GPIO.PWM(self.nitrous_run_servo_pin,self.pwm_frequency)
+        self.nitrous_run_servo.start(self.closed_duty_cycle)
+
+        GPIO.setup(self.fuel_run_servo_pin, GPIO.OUT)
+        self.fuel_run_servo = GPIO.PWM(self.fuel_run_servo_pin)
+        self.fuel_run_servo.start(self.closed_duty_cycle)
     
+    def _servo_actuate(self,servo: GPIO.PWM,direction):
+        target_dc = 5
+        if direction == 1:
+            target_dc = self.open_duty_cycle
+        else:
+            target_dc = self.closed_duty_cycle
+
+        servo.ChangeDutyCycle(target_dc)
+
     def _stream_setup(self):
         
         aScanListNames = list(self.config["sensor_channel_mapping"].values())
@@ -203,12 +230,12 @@ class LabjackInterface():
             await asyncio.sleep(1)
         if self.ignition_in_progress:
             #open ethanol/fuel run valve and wait 3 sec
-            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),1)
+            self._servo_actuate(self.fuel_run_servo,1)
             await(self.data_sender.broadcast_message("Opening fuel_run for 3 seconds"))
             for ethanol_delay in range(2,-1,-1):
                 await asyncio.sleep(1)
             #open nitrous and start ignition at the same time for 1 second
-            self.servo_actuate(int(self.config["servo_mapping"]["nitrous_run"]),1)
+            self._servo_actuate(self.nitrous_run_servo,1)
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
             for ignition in range(0,-1,-1):
                 if not self.ignition_in_progress:
@@ -220,8 +247,8 @@ class LabjackInterface():
                 logger.warning("Ignition canceled")
             #turns off igniters and closes fuel run and nitrous valves
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
-            self.servo_actuate(int(self.config["servo_mapping"]["nitrous_run"]),0)
-            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),0)
+            self._servo_actuate(self.nitrous_run_servo,0)
+            self._servo_actuate(self.fuel_run_servo,0)
     
     async def sphinx_long_ignition_sequence(self):
         self.ignition_in_progress = True
@@ -231,14 +258,9 @@ class LabjackInterface():
             await self.data_sender.broadcast_message(f"Ignition in {countdown}...")
             await asyncio.sleep(1)
         if self.ignition_in_progress:
-            #open ethanol/fuel run valve and wait 3 sec
-            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),1)
-            await(self.data_sender.broadcast_message("Opening fuel_run for 3 seconds"))
-            for ethanol_delay in range(2,-1,-1):
-                await asyncio.sleep(1)
             #open fuel_run nitrous and start ignition at the same time for 1 second
-            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),1)
-            self.servo_actuate(int(self.config["servo_mapping"]["nitrous_run"]),1)
+            self._servo_actuate(self.fuel_run_servo,1)
+            self._servo_actuate(self.nitrous_run_servo,1)
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
             for ignition in range(4,-1,-1):
                 if not self.ignition_in_progress:
@@ -250,8 +272,8 @@ class LabjackInterface():
                 logger.warning("Ignition canceled")
             #turns off igniters and closes fuel run and nitrous valves
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
-            self.servo_actuate(int(self.config["servo_mapping"]["nitrous_run"]),0)
-            self.servo_actuate(int(self.config["servo_mapping"]["fuel_run"]),0)
+            self._servo_actuate(self.nitrous_run_servo,0)
+            self._servo_actuate(self.fuel_run_servo,0)
 
 
     async def proxima_ignition_sequence(self):
@@ -327,5 +349,9 @@ class LabjackInterface():
             states.append(int(char))
         statebin = format(int(ljm.eReadName(self.handle,"CIO_STATE")),'04b')
         states = [(int(statebin[1]))] + states
+        #replace with getter method
+        states.append(self.nitrous_run_state)
+        states.append(self.fuel_run_state)
         self.valve_state_buf[0] = states[::-1]
         print(self.valve_state_buf[0])
+
