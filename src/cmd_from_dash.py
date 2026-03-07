@@ -51,13 +51,24 @@ class CmdListener:
                     await self.data_sender.send_message(websocket, "Actuate failed: Invalid password")
                     return
                 logger.info("Setting driver " + self.config["driver_mapping"][str(cmd["driver_id"])] + " to " + str(cmd["value"]))
+
                 await self.data_sender.broadcast_message(f"Actuating driver id {cmd['driver_id']} - {cmd['value']}")
-                await self.ljm_int.actuate(self.config["driver_mapping"][str(cmd["driver_id"])], cmd["value"])
+                #clean this up 
+                if (self.config["general"]["engine"] == "sphinx" and int(cmd["driver_id"]) == 5):
+                    await self.ljm_int.servo_actuate(self.ljm_int.fuel_run_servo, int(cmd["value"]))
+                elif (self.config["general"]["engine"] == "sphinx" and int(cmd["driver_id"]) == 6):
+                    await self.ljm_int.servo_actuate(self.ljm_int.nitrous_run_servo, int(cmd["value"]))
+                else:
+                    await self.ljm_int.actuate(self.config["driver_mapping"][str(cmd["driver_id"])], cmd["value"])
             elif cmd["type"] == "Ignition":
                 if ("password" not in cmd) or (cmd["password"] != self.config["general"]["password"]):
                     await self.data_sender.send_message(websocket, "Ignition failed: Invalid password")
                     return
-                await self.ljm_int.ignition_sequence()
+                if cmd["engine"] == "sphinx":
+                    #change this for the second hotfire
+                    await self.ljm_int.sphinx_short_ignition_sequence()
+                else:
+                    await self.ljm_int.proxima_ignition_sequence()
             elif cmd["type"] == "Proxima Ignition":
                 if ("password" not in cmd) or (cmd["password"] != self.config["general"]["password"]):
                     await self.data_sender.send_message(websocket, "Ignition failed: Invalid password")

@@ -164,7 +164,8 @@ class LabjackInterface():
         self.fuel_run_servo = GPIO.PWM(self.fuel_run_servo_pin)
         self.fuel_run_servo.start(self.closed_duty_cycle)
     
-    def _servo_actuate(self,servo: GPIO.PWM,direction):
+    # Non-async (ie: blocking) function for ignition
+    def _servo_actuate_ign(self,servo: GPIO.PWM,direction):
         target_dc = 5
         if direction == 1:
             target_dc = self.open_duty_cycle
@@ -230,12 +231,12 @@ class LabjackInterface():
             await asyncio.sleep(1)
         if self.ignition_in_progress:
             #open ethanol/fuel run valve and wait 3 sec
-            self._servo_actuate(self.fuel_run_servo,1)
+            self._servo_actuate_ign(self.fuel_run_servo,1)
             await(self.data_sender.broadcast_message("Opening fuel_run for 3 seconds"))
             for ethanol_delay in range(2,-1,-1):
                 await asyncio.sleep(1)
             #open nitrous and start ignition at the same time for 1 second
-            self._servo_actuate(self.nitrous_run_servo,1)
+            self._servo_actuate_ign(self.nitrous_run_servo,1)
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
             for ignition in range(0,-1,-1):
                 if not self.ignition_in_progress:
@@ -247,8 +248,8 @@ class LabjackInterface():
                 logger.warning("Ignition canceled")
             #turns off igniters and closes fuel run and nitrous valves
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
-            self._servo_actuate(self.nitrous_run_servo,0)
-            self._servo_actuate(self.fuel_run_servo,0)
+            self._servo_actuate_ign(self.nitrous_run_servo,0)
+            self._servo_actuate_ign(self.fuel_run_servo,0)
     
     async def sphinx_long_ignition_sequence(self):
         self.ignition_in_progress = True
@@ -259,8 +260,8 @@ class LabjackInterface():
             await asyncio.sleep(1)
         if self.ignition_in_progress:
             #open fuel_run nitrous and start ignition at the same time for 1 second
-            self._servo_actuate(self.fuel_run_servo,1)
-            self._servo_actuate(self.nitrous_run_servo,1)
+            self._servo_actuate_ign(self.fuel_run_servo,1)
+            self._servo_actuate_ign(self.nitrous_run_servo,1)
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
             for ignition in range(4,-1,-1):
                 if not self.ignition_in_progress:
@@ -272,8 +273,8 @@ class LabjackInterface():
                 logger.warning("Ignition canceled")
             #turns off igniters and closes fuel run and nitrous valves
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
-            self._servo_actuate(self.nitrous_run_servo,0)
-            self._servo_actuate(self.fuel_run_servo,0)
+            self._servo_actuate_ign(self.nitrous_run_servo,0)
+            self._servo_actuate_ign(self.fuel_run_servo,0)
 
 
     async def proxima_ignition_sequence(self):
@@ -315,6 +316,15 @@ class LabjackInterface():
 
     async def actuate(self, driver: int, value: bool):
         ljm.eWriteName(self.handle, driver, value)
+    
+    #non-blocking function for regular actuation
+    async def servo_actuate(self,servo: GPIO.PWM, direction: int):
+        target_dc = 5
+        if direction == 1:
+            target_dc = self.open_duty_cycle
+        else:
+            target_dc = self.closed_duty_cycle
+        servo.ChangeDutyCycle(target_dc)
         
     async def check_for_emergency(self, emergency_sensor_value: float):
         if self.emergency_shutdown_triggered:
@@ -344,14 +354,13 @@ class LabjackInterface():
 
     async def _update_valve_states(self):
         states = []
-        statebin = format(int(ljm.eReadName(self.handle,"EIO_STATE")),'06b')
-        for char in statebin:
-            states.append(int(char))
-        statebin = format(int(ljm.eReadName(self.handle,"CIO_STATE")),'04b')
-        states = [(int(statebin[1]))] + states
+        for driver in sorted(self.config["driver_mapping"], key=int):
+            channel = self.config["driver_mapping"]["driver_mapping"]
+            states.append(int(ljm.eReadName(self.handle,channel)))
         #replace with getter method
-        states.append(self.nitrous_run_state)
-        states.append(self.fuel_run_state)
-        self.valve_state_buf[0] = states[::-1]
+        if self.config["general"]["engine"] == "sphinx":
+            states.append(self.fuel_run_state)
+            states.append(self.nitrous_run_state)
+        self.valve_state_buf[0] = states
         print(self.valve_state_buf[0])
 
