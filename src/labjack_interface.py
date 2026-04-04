@@ -119,6 +119,12 @@ class LabjackInterface():
                                                 float(self.config['conversion'][scale_key]), 5)
     
         return n_sensors.tolist()
+
+    # TODO: Modify actual logic
+    def read_rtd():
+        x = 98.7
+        return x
+
     
     async def _write_data_to_sd(self, data: List[int]):
         num_new_rows = int(len(data) / self.num_channels)
@@ -132,7 +138,15 @@ class LabjackInterface():
         except Exception as e:
             logger.error(e)
 
-        self.data_buf[0] = write_data[-1].tolist()[-self.num_channels:]
+        dummyList = []
+        dummyList = write_data[-1].tolist()[-self.num_channels:]
+
+        # TODO: add actual logic
+        # dummyList[6] = 99;
+        dummyList[6] = read_rtd()
+
+        # self.data_buf[0] = write_data[-1].tolist()[-self.num_channels:]
+        self.data_buf[0] = dummyList
         self.csv_writer.writerows(write_data)
     
     def _clear_drivers(self):
