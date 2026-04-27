@@ -6,6 +6,9 @@ import websockets
 from configparser import ConfigParser
 import time
 import logging
+import board
+from digitalio import DigitalInOut, Direction
+import adafruit_max31865
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,10 @@ class DataSender:
         self.VALVE_RESET_SECS = int(self.config['general']['reset_valves_min']) * 60
         self.running = False
         self.valve_state_buf = valve_state_buf
+        spi = board.SPI()
+        cs = DigitalInOut(board.D5)  
+        self.rtd_sensor = adafruit_max31865.MAX31865(spi, cs,wires=3)
+        self.latest_rtd_temp = None
         
     async def __aenter__(self):
         self.running = True
@@ -77,25 +84,31 @@ class DataSender:
         logger.info(f"Broadcasting message: '{message}'")
         broadcast(self.clients.values(), payload)
 
+    def get_latest_rtd_temperature(self):
+        temp = 0
+        if (self.latest_rtd_temp != None):
+            temp = round(self.latest_rtd_temp,3)
+        return temp
+
+    def _read_rtd_temperature(self):
+        try:
+            self.latest_rtd_temp = self.rtd_sensor.temperature
+        except Exception as e:
+            logger.error(f"Failed to read RTD temperature: {e}")
+        return self.latest_rtd_temp
+
     def _construct_message(self):
         buf_data = self.data_buf[0]
         states = self.valve_state_buf[0]
+        temp = self._read_rtd_temperature()
         return {
-            "tcs": {
+            "rtds": {
                 "type": "SensorValue",
                 "group_id": 0,
                 "readings": [
                     {
                         "sensor_id": 0,
-                        "reading": buf_data[6],
-                        "time": {
-                            "secs_since_epoch": int(time.time()),
-                            "nanos_since_epoch": 0
-                        }
-                    },
-                    {
-                        "sensor_id": 1,
-                        "reading": buf_data[7]
+                        "reading": temp,
                     }
                 ]
             },

@@ -8,6 +8,7 @@ from typing import List
 import csv
 import datetime as dt
 
+
 logger = logging.getLogger(__name__)
 
 class LabjackInterface():
@@ -34,6 +35,8 @@ class LabjackInterface():
         self.csv_writer = None
         self.csv_fd = None
         self.ignition_in_progress = False
+        
+
         # TODO: Why was the emergency check commented out earlier?
         
     async def __aenter__(self):
@@ -45,6 +48,7 @@ class LabjackInterface():
         cols = ["Time (s)"]
         for sensors in self.config["sensor_channel_mapping"]:
             cols.append(sensors)
+        cols.append("rtd_external")
         self.csv_writer.writerow(cols)
         self.task = asyncio.create_task(self._read_labjack_data())
         return self
@@ -122,6 +126,8 @@ class LabjackInterface():
     
     async def _write_data_to_sd(self, data: List[int]):
         num_new_rows = int(len(data) / self.num_channels)
+        if num_new_rows == 0:
+            return
         start_time   = (self.total_samples_read - num_new_rows) / self.sample_rate
         end_time     = (self.total_samples_read - 1) / self.sample_rate
         timestamps   = np.round(np.linspace(start_time, end_time, num_new_rows), 5)
@@ -131,8 +137,12 @@ class LabjackInterface():
             write_data   = np.column_stack((np.transpose(timestamps), self._voltages_to_values(dataR)))
         except Exception as e:
             logger.error(e)
-
+            return
+        
         self.data_buf[0] = write_data[-1].tolist()[-self.num_channels:]
+        latest_rtd = self.data_sender.get_latest_rtd_temperature()
+        rtd_col = np.full((num_new_rows, 1), 0.0 if latest_rtd is None else latest_rtd)
+        write_data = np.column_stack((write_data, rtd_col))
         self.csv_writer.writerows(write_data)
     
     def _clear_drivers(self):
@@ -186,7 +196,70 @@ class LabjackInterface():
             await self.data_sender.broadcast_message(f"IGNITION CANCELED")
             logger.warning("Ignition canceled")
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
+
+    async def sphinx_ignition_sequence_short(self):
+        self.ignition_in_progress = True
+        #TODO: Change countdown if needed
+        for countdown in range(5, -1, -1):
+            if not self.ignition_in_progress:
+                break
+            await self.data_sender.broadcast_message(f"Ignition in {countdown}...")
+            await asyncio.sleep(1)
+        #open nitrous/ox run
+
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["5"], True)
+        #open ethanol valve
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["4"], True)
+        #time delay of 0.2s
+        #TODO: change delay if needed
+        for delay in range(1,0,-1):
+            await asyncio.sleep(0.2)
+        # fire for 2 seconds
+        await self.data_sender.broadcast_message(f"IGNITION IN PROGRESS")
+        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
+        for countdown in range(1, 0, -1):
+                if not self.ignition_in_progress:
+                    break
+                await self.data_sender.broadcast_message(f"IGNITING FOR {countdown} MORE SECONDS")
+                await asyncio.sleep(1.5)
+        if not self.ignition_in_progress:
+            await self.data_sender.broadcast_message(f"IGNITION CANCELED")
+            logger.warning("Ignition canceled")
+        
+        #closes all ethanol, lower servovale, and ignition
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["4"], False)
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["5"], False)
+        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
     
+    async def sphinx_ignition_sequence_long(self):
+        self.ignition_in_progress = True
+        #TODO: Change countdown if needed
+        for countdown in range(5, -1, -1):
+            if not self.ignition_in_progress:
+                break
+            await self.data_sender.broadcast_message(f"Ignition in {countdown}...")
+            await asyncio.sleep(1)
+        #open ethanol and nitrous fill valve and turn on igniters
+        await self.data_sender.broadcast_message(f"IGNITION IN PROGRESS")
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["4"], True)
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["5"], True)
+        #TODO: change delay if needed
+        for delay in range(1,0,-1):
+            await asyncio.sleep(0.2)
+        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
+        for countdown in range(4, -1, -1):
+                if not self.ignition_in_progress:
+                    break
+                await self.data_sender.broadcast_message(f"IGNITING FOR {countdown} MORE SECONDS")
+                await asyncio.sleep(1)
+        if not self.ignition_in_progress:
+            await self.data_sender.broadcast_message(f"IGNITION CANCELED")
+            logger.warning("Ignition canceled")
+        #closes all ethanol, lower servovalve, and ignition
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["4"], False)
+        ljm.eWriteName(self.handle, self.config["driver_mapping"]["5"], False)
+        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
+
     async def proxima_ignition_sequence(self):
         self.ignition_in_progress = True
         for countdown in range(10, -1, -1):
@@ -195,18 +268,18 @@ class LabjackInterface():
             await self.data_sender.broadcast_message(f"Ignition in {countdown}...")
             await asyncio.sleep(1)
         if self.ignition_in_progress:
-            #opens ox fill for 0.75 seconds
+            #opens ox fill for 0.2 seconds
             await self.data_sender.broadcast_message(f"Opening ox fill")
             ljm.eWriteName(self.handle, self.config["driver_mapping"]["0"], True)
             for valve_delay in range(0,-1,-1):
-                await self.data_sender.broadcast_message("Waiting for one second")
-                await asyncio.sleep(0.75)
+                await self.data_sender.broadcast_message("Waiting for 0.2 seconds")
+                await asyncio.sleep(0.2)
                 
             await self.data_sender.broadcast_message(f"IGNITION IN PROGRESS")
 
             #turns on igniters
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
-            for countdown in range(5, -1, -1):
+            for countdown in range(10, -1, -1):
                 if not self.ignition_in_progress:
                     break
                 await self.data_sender.broadcast_message(f"IGNITING FOR {countdown} MORE SECONDS")
