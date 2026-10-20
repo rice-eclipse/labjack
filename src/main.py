@@ -2,6 +2,8 @@
 Data Acquisition and Remote Control for Eclipse Hybrid Engines
 Ian Rundle, President '23-24
 Spencer Darwall, Avionics & Software Lead '22-23
+Deepak Narayan, Mission Control Lead `24-26
+Wilson Harper, Mission Control Lead `26-27
 
 Code interfaces with LabJack device hardware via LJM Library. The LabJack
 has input pins for each sensor and output pins for each driver- this script logs

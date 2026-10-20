@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../quonkboard"
+		},
+		{
+			"path": "../hotfire-data"
+		}
+	],
+	"settings": {}
+}

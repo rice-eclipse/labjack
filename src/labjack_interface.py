@@ -170,6 +170,8 @@ class LabjackInterface():
         numFrames = len(reg_names)
         try:
             ljm.eWriteNames(self.handle, numFrames, reg_names, reg_values)
+            #we are also amplifying the 0-5VDC BPS PT
+            ljm.eWriteName(self.handle,"AIN64_RANGE",1)
         except Exception as e:
             ljm.eStreamStop(self.handle)
             ljm.close(self.handle)
@@ -244,8 +246,6 @@ class LabjackInterface():
         ljm.eWriteName(self.handle, self.config["driver_mapping"]["4"], True)
         ljm.eWriteName(self.handle, self.config["driver_mapping"]["5"], True)
         #TODO: change delay if needed
-        for delay in range(1,0,-1):
-            await asyncio.sleep(0.2)
         ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
         for countdown in range(4, -1, -1):
                 if not self.ignition_in_progress:
@@ -279,7 +279,7 @@ class LabjackInterface():
 
             #turns on igniters
             ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
-            for countdown in range(10, -1, -1):
+            for countdown in range(20, -1, -1):
                 if not self.ignition_in_progress:
                     break
                 await self.data_sender.broadcast_message(f"IGNITING FOR {countdown} MORE SECONDS")
@@ -293,9 +293,41 @@ class LabjackInterface():
         #closes ops pneumatic valve
         ljm.eWriteName(self.handle, self.config["driver_mapping"]["5"], False)
 
+
+    async def prometheus_ignition_sequence(self):
+        self.ignition_in_progress = True
+        for countdown in range(10, -1, -1):
+            if not self.ignition_in_progress:
+                break
+            await self.data_sender.broadcast_message(f"Ignition in {countdown}...")
+            await asyncio.sleep(1)
+        if self.ignition_in_progress:
+            #turns on igniter
+            ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],1)
+            for i in range(0,-1,-1):
+                await asyncio.sleep(1)
+            #opens fuel/ox flow
+            ljm.eWriteName(self.handle,self.config["driver_mapping"]["0"],True)
+            ljm.eWriteName(self.handle,self.config["driver_mapping"]["8"],True)
+            for i in range(0,-1,-1):
+                await asyncio.sleep(5)
+            #closes fuel/ox flow, turns off igniter
+            ljm.eWriteName(self.handle,self.config["driver_mapping"]["0"],False)
+            ljm.eWriteName(self.handle,self.config["driver_mapping"]["8"],False)
+            ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
+            for countdown in range(10, -1, -1):
+                if not self.ignition_in_progress:
+                    break
+                await self.data_sender.broadcast_message(f"IGNITING FOR {countdown} MORE SECONDS")
+                await asyncio.sleep(1)
+        if not self.ignition_in_progress:
+            await self.data_sender.broadcast_message(f"IGNITION CANCELED")
+            logger.warning("Ignition canceled")
+        ljm.eWriteName(self.handle, self.config["driver_mapping"][str(6)],0)
     async def cancel_ignition(self):
         self.ignition_in_progress = False
         await self.data_sender.broadcast_message(f"Canceling ignition...")
+
 
     async def actuate(self, driver: int, value: bool):
         ljm.eWriteName(self.handle, driver, value)
@@ -329,6 +361,8 @@ class LabjackInterface():
         for char in statebin:
             states.append(int(char))
         statebin = format(int(ljm.eReadName(self.handle,"CIO_STATE")),'04b')
-        states = [(int(statebin[1]))] + states
+        print(states)
+        states = [(int(statebin[3])),(int(statebin[2])),(int(statebin[1]))] + states
+        print(states)
         self.valve_state_buf[0] = states[::-1]
         print(self.valve_state_buf[0])

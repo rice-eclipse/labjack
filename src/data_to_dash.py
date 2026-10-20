@@ -118,18 +118,26 @@ class DataSender:
                 "readings": [
                     {
                         "sensor_id": 0,
-                        "reading": buf_data[10],
+                        "reading": buf_data[8],
                     },
                     {
                         "sensor_id": 1,
-                        "reading": buf_data[11]
+                        "reading": buf_data[9]
                     },
                     {
                         "sensor_id": 2,
-                        "reading": buf_data[12]
+                        "reading": buf_data[10]
                     },
                     {
                         "sensor_id": 3,
+                        "reading": buf_data[11]
+                    },
+                    {
+                        "sensor_id": 4,
+                        "reading": buf_data[12]
+                    },
+                    {
+                        "sensor_id": 5,
                         "reading": buf_data[13]
                     }
                 ]
