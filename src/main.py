@@ -1,5 +1,5 @@
 """
-Data Acquisition and Remote Control for Eclipse Hybrid Engines
+Data Acquisition and Remote Control for Eclipse Liquid Engines
 Ian Rundle, President '23-24
 Spencer Darwall, Avionics & Software Lead '22-23
 Deepak Narayan, Mission Control Lead `24-26
@@ -84,8 +84,8 @@ def main():
     asyncio.run(ServiceDirector("config.ini").run())
 
 print("\n===============================================================\
-\nData Acquisition and Remote Control for Eclipse Hybrid Engines\
-\nSoftware version 2.0.0\
+\nData Acquisition and Remote Control for Eclipse Liquid Engines\
+\nSoftware version 2.1.0\
 \n===============================================================")
 main()
 print("[I] Stopping program")

@@ -361,8 +361,5 @@ class LabjackInterface():
         for char in statebin:
             states.append(int(char))
         statebin = format(int(ljm.eReadName(self.handle,"CIO_STATE")),'04b')
-        print(states)
         states = [(int(statebin[3])),(int(statebin[2])),(int(statebin[1]))] + states
-        print(states)
         self.valve_state_buf[0] = states[::-1]
-        print(self.valve_state_buf[0])
