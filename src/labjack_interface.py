@@ -41,7 +41,7 @@ class LabjackInterface():
         
     async def __aenter__(self):
         self.running = True
-        filename = f"../data/{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.csv"
+        filename = f"../data/{dt.datetime.now().strftime('%m_%d_%Y_%H-%M-%S')}.csv"
         self.csv_fd = open(filename, "x")
         self.csv_writer = csv.writer(self.csv_fd)
         logger.info(f"Created new file: {filename}")

@@ -44,7 +44,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(f"../logs/log_{dt.datetime.now().strftime('%m_%d_%Y_%H:%M:%S')}.log")
+        logging.FileHandler(f"../logs/log_{dt.datetime.now().strftime('%m_%d_%Y_%H-%M-%S')}.log")
     ]
 )
 
@@ -71,7 +71,11 @@ class ServiceDirector():
                     
                     loop = asyncio.get_event_loop()
                     stop = loop.create_future()
-                    loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
+                    try:
+                        loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
+                    except NotImplementedError:
+                        # Windows has no asyncio signal handlers; Ctrl+C still stops the program
+                        pass
                     async with serve(
                         ws_handle, 
                         self.config["general"]["HOST"], 
